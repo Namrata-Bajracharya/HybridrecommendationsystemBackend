@@ -1,11 +1,12 @@
 from app.schema.address_schema import AddressCreate, AddressUpdate, AddressPublic
 from app.services.address_service import AddressService
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi import Request, Response
 from app.services.user_service import UserService
 from app.schema.user_schema import (
     CreateUserSchema,
     LoginSchema,
-    TokenSchema,
+    LoginResponse,
     UserPublic,
     UpdateUserSchema,
     DeleteUserResponseModel,
@@ -57,13 +58,13 @@ async def create_user(
 
 @router.post(
     "/login",
-    response_model=TokenSchema,
+    response_model=LoginResponse,
     summary="Login",
     description="Authenticate a user and return a JWT token.",
 )
 async def login(
     user_login_data: LoginSchema, user_service: user_dependency
-) -> TokenSchema:
+ ) -> LoginResponse:
     """
     Authenticate a user and return an access token.
 
@@ -75,7 +76,7 @@ async def login(
     - user_service (UserService): Dependency-injected service for user operations.
 
     Returns:
-    - TokenSchema: An object containing the JWT access token and token type.
+    - LoginResponse: An object containing the JWT access token and the authenticated user's public profile.
 
     Raises:
     - HTTPException: If credentials are invalid (e.g., 401 Unauthorized).
@@ -173,6 +174,24 @@ async def delete_user(
     """
     user_service.delete_user(id=current_user.id)
     return {"detail": "User deleted successfully"}
+
+
+@router.post(
+    "/logout",
+    summary="Logout",
+    description="Invalidate server-side session and clear auth cookies.",
+)
+async def logout(request: Request, response: Response):
+    """Logout the current session by clearing session-related cookies.
+
+    This endpoint removes cookies such as `session_id` and `refresh_token` so the
+    client is effectively logged out. JWT invalidation (if required) should be
+    implemented via a token blacklist or short-lived tokens + refresh rotation.
+    """
+    # Remove common session cookies if present
+    response.delete_cookie("session_id")
+    response.delete_cookie("refresh_token")
+    return {"detail": "Logged out"}
 
 
 @router.post(

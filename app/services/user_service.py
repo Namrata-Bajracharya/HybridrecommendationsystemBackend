@@ -2,7 +2,7 @@ from app.schema.user_schema import (
     CreateUserSchema,
     UserPublic,
     LoginSchema,
-    TokenSchema,
+    LoginResponse,
     UpdateUserSchema,
 )
 from app.models.user import User
@@ -70,7 +70,7 @@ class UserService:
             return None
         return user
 
-    def login(self, user_login_data: LoginSchema) -> TokenSchema:
+    def login(self, user_login_data: LoginSchema) -> LoginResponse:
         """
         Handle user login and generate an access token.
 
@@ -93,7 +93,12 @@ class UserService:
             )
         access_token_payload = {"sub": str(user.id)}
         access_token = create_token(data=access_token_payload)
-        return TokenSchema(token=access_token, token_type="Bearer")
+        # Return token and public user info so frontend can route by role
+        return {
+            "token": access_token,
+            "token_type": "Bearer",
+            "user": UserPublic.model_validate(user),
+        }
 
     def get_user_by_id(self, id: int) -> User:
         """

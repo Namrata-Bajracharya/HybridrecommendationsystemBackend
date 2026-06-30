@@ -14,12 +14,41 @@ from app.api.v1.init_routes import init_routes
 from app.core.logger import logger
 from app.middleware.request_logger import LoggingMiddleware
 
+# DB/user seeding
+from app.db.database import SessionLocal
+from app.crud.user import UserCrud
+from app.schema.user_schema import CreateUserSchema
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Application starting...")
 
     # Startup tasks go here
+    # Seed default admin user if missing
+    db = SessionLocal()
+    try:
+        try:
+            user_crud = UserCrud(db=db)
+            admin_email = "admin@kallee.com"
+            existing = user_crud.get_user_by_email(admin_email)
+            if not existing:
+                admin_data = CreateUserSchema(
+                    email=admin_email,
+                    password="admin123",
+                    first_name="Admin",
+                    last_name="",
+                    phone="",
+                )
+                created = user_crud.create_user(admin_data)
+                # ensure role is admin
+                created.role = "admin"
+                db.commit()
+                logger.info("Created default admin user: %s", admin_email)
+        except Exception as e:
+            logger.exception("Failed to seed admin user: %s", e)
+    finally:
+        db.close()
 
     yield
 

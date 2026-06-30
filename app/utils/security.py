@@ -4,7 +4,7 @@ from typing import Dict, Optional, Any
 import jwt
 from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
 from app.core.config import settings
-from app.schema.user_schema import TokenSchema
+# TokenSchema not required here
 
 # implement password hashing
 password_hash = PasswordHash.recommended()

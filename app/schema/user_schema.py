@@ -35,6 +35,13 @@ class TokenSchema(BaseModel):
     token_type: str
 
 
+class LoginResponse(BaseModel):
+    token: str
+    token_type: str
+    user: UserPublic
+
+
+
 class UserPublic(BaseModel):
     id: int
     email: EmailStr

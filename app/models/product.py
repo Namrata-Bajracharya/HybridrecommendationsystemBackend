@@ -27,6 +27,7 @@ class Product(Base):
     price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     stock_quantity: Mapped[int] = mapped_column(default=0)
     sku: Mapped[Optional[str]] = mapped_column(String(100), unique=True)
+    brand_id: Mapped[Optional[int]] = mapped_column(ForeignKey("brands.id"), nullable=True)
     category_id: Mapped[Optional[int]] = mapped_column(ForeignKey("categories.id"))
     image_document_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True)
@@ -39,6 +40,7 @@ class Product(Base):
 
     # Relationships
     category: Mapped["Category"] = relationship("Category", back_populates="products")
+    brand: Mapped[Optional["Brand"]] = relationship("Brand", back_populates="products")
     document: Mapped[Optional["Document"]] = relationship("Document", primaryjoin="Product.image_document_id==foreign(Document.id)")
     cart_items: Mapped[List["CartItem"]] = relationship(
         "CartItem", back_populates="product", cascade="all, delete-orphan"
