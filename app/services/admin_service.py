@@ -1,4 +1,93 @@
 from sqlalchemy.orm import Session
+from typing import List, Optional
+from app.models.brand import Brand
+from app.models.supplier import Supplier
+from app.models.coupon import Coupon
+from app.models.payment import PaymentMethod
+from app.models.shipping import ShippingZone, Courier
+from app.models.inventory import InventoryMovement
+from app.models.purchase_order import PurchaseOrder
+from app.models.notification import Notification
+
+
+class AdminService:
+    def __init__(self, db: Session):
+        self.db = db
+
+    # Brands
+    def create_brand(self, name: str, description: Optional[str] = None) -> Brand:
+        b = Brand(name=name, description=description)
+        self.db.add(b)
+        self.db.commit()
+        self.db.refresh(b)
+        return b
+
+    def list_brands(self) -> List[Brand]:
+        return self.db.query(Brand).all()
+
+    def get_brand(self, id: int) -> Optional[Brand]:
+        return self.db.get(Brand, id)
+
+    # Suppliers
+    def create_supplier(self, name: str, contact_email: Optional[str] = None, contact_phone: Optional[str] = None, address: Optional[str] = None) -> Supplier:
+        s = Supplier(name=name, contact_email=contact_email, contact_phone=contact_phone, address=address)
+        self.db.add(s)
+        self.db.commit()
+        self.db.refresh(s)
+        return s
+
+    def list_suppliers(self) -> List[Supplier]:
+        return self.db.query(Supplier).all()
+
+    # Coupons
+    def create_coupon(self, code: str, is_percentage: bool, amount: float, description: Optional[str] = None, active: bool = True) -> Coupon:
+        c = Coupon(code=code, is_percentage=is_percentage, amount=amount, description=description, active=active)
+        self.db.add(c)
+        self.db.commit()
+        self.db.refresh(c)
+        return c
+
+    def list_coupons(self) -> List[Coupon]:
+        return self.db.query(Coupon).all()
+
+    # Payment methods
+    def list_payment_methods(self) -> List[PaymentMethod]:
+        return self.db.query(PaymentMethod).all()
+
+    # Shipping
+    def list_shipping_zones(self) -> List[ShippingZone]:
+        return self.db.query(ShippingZone).all()
+
+    def list_couriers(self) -> List[Courier]:
+        return self.db.query(Courier).all()
+
+    # Inventory
+    def record_inventory_movement(self, product_id: int, change: int, reason: Optional[str] = None) -> InventoryMovement:
+        m = InventoryMovement(product_id=product_id, change=change, reason=reason)
+        self.db.add(m)
+        self.db.commit()
+        self.db.refresh(m)
+        return m
+
+    # Purchase Orders
+    def create_purchase_order(self, supplier_id: int, total_amount: float = 0.0, status: str = "draft") -> PurchaseOrder:
+        p = PurchaseOrder(supplier_id=supplier_id, total_amount=total_amount, status=status)
+        self.db.add(p)
+        self.db.commit()
+        self.db.refresh(p)
+        return p
+
+    # Notifications
+    def create_notification(self, user_id: Optional[int], title: str, message: str) -> Notification:
+        n = Notification(user_id=user_id, title=title, message=message)
+        self.db.add(n)
+        self.db.commit()
+        self.db.refresh(n)
+        return n
+
+    def list_notifications_for_user(self, user_id: int) -> List[Notification]:
+        return self.db.query(Notification).filter(Notification.user_id == user_id).all()
+from sqlalchemy.orm import Session
 from sqlalchemy import select, func, and_, or_
 from datetime import datetime, timedelta
 from typing import Optional, List

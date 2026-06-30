@@ -5,6 +5,7 @@ from app.crud.category import CategoryCrud
 from app.schema.category_schema import CreateCategory, UpdateCategory, CategoryPublic
 from fastapi import HTTPException, status
 from app.core.logger import logger
+from app.crud.document import DocumentCrud
 
 
 class CategoryService:
@@ -17,6 +18,11 @@ class CategoryService:
     def create_category(self, create_dto: CreateCategory) -> CategoryPublic:
         """Create a category and return a validated response model."""
         try:
+            # validate image document id if provided
+            if getattr(create_dto, "image_document_id", None):
+                doc = DocumentCrud(self.db).get_by_id(create_dto.image_document_id)
+                if not doc:
+                    raise HTTPException(status_code=400, detail="Invalid image_document_id")
             result = self.crud.create_category(create_dto)
             return CategoryPublic.model_validate(result)
         except CategoryCreationError as e:

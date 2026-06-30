@@ -3,6 +3,162 @@ from typing import Optional, List
 from datetime import datetime
 
 
+# Brand
+class BrandCreate(BaseModel):
+    name: str = Field(..., min_length=1)
+    description: Optional[str] = None
+
+
+class BrandResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str]
+    created_at: datetime
+    updated_at: Optional[datetime]
+
+    model_config = {"from_attributes": True}
+
+
+# Supplier
+class SupplierCreate(BaseModel):
+    name: str
+    contact_email: Optional[str]
+    contact_phone: Optional[str]
+    address: Optional[str]
+
+
+class SupplierResponse(BaseModel):
+    id: int
+    name: str
+    contact_email: Optional[str]
+    contact_phone: Optional[str]
+    address: Optional[str]
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# Coupon
+class CouponCreate(BaseModel):
+    code: str
+    is_percentage: bool = True
+    amount: float
+    description: Optional[str] = None
+    active: bool = True
+
+
+class CouponResponse(BaseModel):
+    id: int
+    code: str
+    is_percentage: bool
+    amount: float
+    active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# Payment Method
+class PaymentMethodCreate(BaseModel):
+    name: str
+    provider: Optional[str]
+
+
+class PaymentMethodResponse(BaseModel):
+    id: int
+    name: str
+    provider: Optional[str]
+    active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# Shipping
+class ShippingZoneCreate(BaseModel):
+    name: str
+    description: Optional[str]
+
+
+class ShippingZoneResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str]
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class CourierCreate(BaseModel):
+    name: str
+    phone: Optional[str]
+
+
+class CourierResponse(BaseModel):
+    id: int
+    name: str
+    phone: Optional[str]
+    active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# Inventory movement
+class InventoryMovementCreate(BaseModel):
+    product_id: int
+    change: int
+    reason: Optional[str]
+
+
+class InventoryMovementResponse(BaseModel):
+    id: int
+    product_id: int
+    change: int
+    reason: Optional[str]
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# Purchase order
+class PurchaseOrderCreate(BaseModel):
+    supplier_id: int
+    total_amount: float = 0.0
+    status: Optional[str] = "draft"
+
+
+class PurchaseOrderResponse(BaseModel):
+    id: int
+    supplier_id: int
+    total_amount: float
+    status: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# Notification
+class NotificationCreate(BaseModel):
+    user_id: Optional[int]
+    title: str
+    message: str
+
+
+class NotificationResponse(BaseModel):
+    id: int
+    user_id: Optional[int]
+    title: str
+    message: str
+    read: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+from pydantic import BaseModel, Field
+from typing import Optional, List
+from datetime import datetime
+
+
 # Analytics Schemas
 class SalesAnalytics(BaseModel):
     """Sales analytics for admin dashboard"""

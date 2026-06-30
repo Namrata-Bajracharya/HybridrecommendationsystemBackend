@@ -1,25 +1,27 @@
 from typing import Annotated, Generator, Optional
 
-from elasticsearch import AsyncElasticsearch
+# from elasticsearch import AsyncElasticsearch
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from app.core.elastic_config import get_es_client
+# from app.core.elastic_config import get_es_client
 from app.core.logger import *
-from app.core.redis import RedisClient, redis_client
+# from app.core.redis import RedisClient, redis_client
 from app.db.database import SessionLocal
 from app.models.user import User
 from app.schema.user_schema import UserPublic
 from app.services.address_service import AddressService
 from app.services.cart_service import CartService
 from app.services.category_service import CategoryService
-from app.services.elasticsearch_service import ElasticService
+# from app.services.elasticsearch_service import ElasticService
 from app.services.order_service import OrderService
 from app.services.payment_service import PaymentService
 from app.services.product_service import ProductService
+from app.services.recommendation_service import RecommendationService
 from app.services.review_service import ReviewService
 from app.services.user_service import UserService
+from app.services.document_service import DocumentService
 from app.utils.security import TokenError, decode_access_token
 
 oauth_scheme = HTTPBearer(
@@ -40,12 +42,12 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-async def get_redis_manager() -> RedisClient:
-    return redis_client
+# DISABLED: Redis and Elasticsearch are not required for development
+# async def get_redis_manager() -> RedisClient:
+#     return redis_client
 
-
-async def get_elastic_manager() -> AsyncElasticsearch:
-    return await get_es_client()
+# async def get_elastic_manager() -> AsyncElasticsearch:
+#     return await get_es_client()
 
 
 def get_user_service_dep(db: Session = Depends(get_db)) -> UserService:
@@ -55,10 +57,11 @@ def get_user_service_dep(db: Session = Depends(get_db)) -> UserService:
     return UserService(db=db)
 
 
-def get_elastic_service_dep(
-    es: Annotated[AsyncElasticsearch, Depends(get_elastic_manager)],
-) -> ElasticService:
-    return ElasticService(es=es)
+# DISABLED: Elasticsearch not required for development
+# def get_elastic_service_dep(
+#     es: Annotated[AsyncElasticsearch, Depends(get_elastic_manager)],
+# ) -> ElasticService:
+#     return ElasticService(es=es)
 
 
 def get_address_service_dep(db: Session = Depends(get_db)) -> AddressService:
@@ -74,9 +77,10 @@ def get_category_service_dep(db: Session = Depends(get_db)) -> CategoryService:
 
 def get_product_service_dep(
     db: Annotated[Session, Depends(get_db)],
-    redis_client: Annotated[RedisClient, Depends(get_redis_manager)],
+    # DISABLED: Redis not required for development
+    # redis_client: Annotated[RedisClient, Depends(get_redis_manager)],
 ) -> ProductService:
-    return ProductService(db=db, redis=redis_client)
+    return ProductService(db=db, redis=None)
 
 
 def get_cart_service_dep(db: Annotated[Session, Depends(get_db)]) -> CartService:
@@ -89,6 +93,20 @@ def get_order_service_dep(db: Annotated[Session, Depends(get_db)]) -> OrderServi
 
 def get_review_service_dep(db: Annotated[Session, Depends(get_db)]) -> ReviewService:
     return ReviewService(db=db)
+
+
+def get_recommendation_service_dep(
+    db: Annotated[Session, Depends(get_db)],
+) -> RecommendationService:
+    """
+    Recommendation service dependency
+    Loads ML model and training data for hybrid recommendations
+    """
+    return RecommendationService(db=db)
+
+
+def get_document_service_dep(db: Annotated[Session, Depends(get_db)]) -> DocumentService:
+    return DocumentService(db=db)
 
 
 def get_payment_service_dep(db: Annotated[Session, Depends(get_db)]) -> PaymentService:

@@ -1,3 +1,105 @@
+from fastapi import APIRouter, Depends, status
+from typing import Annotated, List
+from datetime import datetime
+
+from app.dependencies import get_db, require_admin, get_optional_user
+from sqlalchemy.orm import Session
+from app.services.admin_service import AdminService
+from app.schema.admin_schema import (
+    BrandCreate,
+    BrandResponse,
+    SupplierCreate,
+    SupplierResponse,
+    CouponCreate,
+    CouponResponse,
+    PaymentMethodResponse,
+    ShippingZoneResponse,
+    CourierResponse,
+    InventoryMovementCreate,
+    InventoryMovementResponse,
+    PurchaseOrderCreate,
+    PurchaseOrderResponse,
+    NotificationCreate,
+    NotificationResponse,
+)
+from app.schema.user_schema import UserPublic
+
+router = APIRouter(tags=["Admin"])
+
+
+def get_admin_service(db: Session = Depends(get_db)) -> AdminService:
+    return AdminService(db=db)
+
+
+@router.post("/brands", response_model=BrandResponse, status_code=status.HTTP_201_CREATED)
+def create_brand(
+    create: BrandCreate,
+    admin: Annotated[UserPublic, Depends(require_admin)],
+    svc: Annotated[AdminService, Depends(get_admin_service)],
+):
+    return svc.create_brand(name=create.name, description=create.description)
+
+
+@router.get("/brands", response_model=List[BrandResponse])
+def list_brands(svc: Annotated[AdminService, Depends(get_admin_service)]):
+    return svc.list_brands()
+
+
+@router.post("/suppliers", response_model=SupplierResponse, status_code=status.HTTP_201_CREATED)
+def create_supplier(create: SupplierCreate, admin: Annotated[UserPublic, Depends(require_admin)], svc: Annotated[AdminService, Depends(get_admin_service)]):
+    return svc.create_supplier(name=create.name, contact_email=create.contact_email, contact_phone=create.contact_phone, address=create.address)
+
+
+@router.get("/suppliers", response_model=List[SupplierResponse])
+def list_suppliers(svc: Annotated[AdminService, Depends(get_admin_service)]):
+    return svc.list_suppliers()
+
+
+@router.post("/coupons", response_model=CouponResponse, status_code=status.HTTP_201_CREATED)
+def create_coupon(create: CouponCreate, admin: Annotated[UserPublic, Depends(require_admin)], svc: Annotated[AdminService, Depends(get_admin_service)]):
+    return svc.create_coupon(code=create.code, is_percentage=create.is_percentage, amount=create.amount, description=create.description, active=create.active)
+
+
+@router.get("/coupons", response_model=List[CouponResponse])
+def list_coupons(svc: Annotated[AdminService, Depends(get_admin_service)]):
+    return svc.list_coupons()
+
+
+@router.get("/payment-methods", response_model=List[PaymentMethodResponse])
+def list_payment_methods(svc: Annotated[AdminService, Depends(get_admin_service)]):
+    return svc.list_payment_methods()
+
+
+@router.get("/shipping-zones", response_model=List[ShippingZoneResponse])
+def list_shipping_zones(svc: Annotated[AdminService, Depends(get_admin_service)]):
+    return svc.list_shipping_zones()
+
+
+@router.get("/couriers", response_model=List[CourierResponse])
+def list_couriers(svc: Annotated[AdminService, Depends(get_admin_service)]):
+    return svc.list_couriers()
+
+
+@router.post("/inventory/movements", response_model=InventoryMovementResponse, status_code=status.HTTP_201_CREATED)
+def create_inventory_movement(create: InventoryMovementCreate, admin: Annotated[UserPublic, Depends(require_admin)], svc: Annotated[AdminService, Depends(get_admin_service)]):
+    return svc.record_inventory_movement(product_id=create.product_id, change=create.change, reason=create.reason)
+
+
+@router.post("/purchase-orders", response_model=PurchaseOrderResponse, status_code=status.HTTP_201_CREATED)
+def create_purchase_order(create: PurchaseOrderCreate, admin: Annotated[UserPublic, Depends(require_admin)], svc: Annotated[AdminService, Depends(get_admin_service)]):
+    return svc.create_purchase_order(supplier_id=create.supplier_id, total_amount=create.total_amount, status=create.status)
+
+
+@router.post("/notifications", response_model=NotificationResponse, status_code=status.HTTP_201_CREATED)
+def create_notification(create: NotificationCreate, admin: Annotated[UserPublic, Depends(require_admin)], svc: Annotated[AdminService, Depends(get_admin_service)]):
+    return svc.create_notification(user_id=create.user_id, title=create.title, message=create.message)
+
+
+@router.get("/notifications/me", response_model=List[NotificationResponse])
+def my_notifications(current_user: Annotated[UserPublic, Depends(get_optional_user)], svc: Annotated[AdminService, Depends(get_admin_service)]):
+    if not current_user:
+        return []
+    return svc.list_notifications_for_user(current_user.id)
 from fastapi import APIRouter, Depends, Query, status
 from typing import Annotated, Optional
 from datetime import datetime

@@ -3,7 +3,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-import logging_loki
+# import logging_loki  # DISABLED: Loki not required for development
 from loguru import logger
 
 # Logs directory inside app/
@@ -43,35 +43,35 @@ logger.add(
     enqueue=True,
 )
 
-# Loki Handler
-class LokiSink:
-    def __init__(self, handler):
-        self.handler = handler
-
-    def write(self, message):
-        record = message.record
-        # Map loguru record to standard logging record
-        log_record = logging.LogRecord(
-            name=record["name"],
-            level=logging.getLevelName(record["level"].name),
-            pathname=record["file"].path,
-            lineno=record["line"],
-            msg=record["message"],
-            args=(),
-            exc_info=None,
-        )
-        self.handler.emit(log_record)
-
-try:
-    loki_handler = logging_loki.LokiHandler(
-        url="http://loki:3100/loki/api/v1/push",
-        tags={"job": "fastapi-app"},
-        version="1",
-    )
-    logger.add(LokiSink(loki_handler), level="INFO")
-except Exception as e:
-    # Fallback if Loki is not available or lib is missing
-    print(f"Failed to initialize Loki handler: {e}")
+# DISABLED: Loki handler not required for development
+# class LokiSink:
+#     def __init__(self, handler):
+#         self.handler = handler
+#
+#     def write(self, message):
+#         record = message.record
+#         # Map loguru record to standard logging record
+#         log_record = logging.LogRecord(
+#             name=record["name"],
+#             level=logging.getLevelName(record["level"].name),
+#             pathname=record["file"].path,
+#             lineno=record["line"],
+#             msg=record["message"],
+#             args=(),
+#             exc_info=None,
+#         )
+#         self.handler.emit(log_record)
+#
+# try:
+#     loki_handler = logging_loki.LokiHandler(
+#         url="http://loki:3100/loki/api/v1/push",
+#         tags={"job": "fastapi-app"},
+#         version="1",
+#     )
+#     logger.add(LokiSink(loki_handler), level="INFO")
+# except Exception as e:
+#     # Fallback if Loki is not available or lib is missing
+#     print(f"Failed to initialize Loki handler: {e}")
 
 # Export the logger instance
 __all__ = ["logger"]

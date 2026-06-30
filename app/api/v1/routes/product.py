@@ -13,6 +13,9 @@ from app.schema.user_schema import UserPublic
 from typing import Annotated, List
 from app.core.logger import logger
 import enum
+from datetime import datetime
+from app.dependencies import get_recommendation_service_dep, get_optional_user
+from app.services.recommendation_service import RecommendationService
 
 router = APIRouter(tags=["Product"])
 product_dependency = Annotated[ProductService, Depends(get_product_service_dep)]
@@ -140,3 +143,59 @@ async def delete_product(
 ):
     product_service.delete_product(id)
     return {"detail": "product deleted successfully"}
+
+
+@router.get("/{slug}/recommendations", response_model="app.schema.recommendation_schema.RecommendationResponse")
+async def get_product_recommendations(
+    slug: Annotated[str, Path(title="The slug of the item")],
+    product_service: product_dependency,
+    rec_service: Annotated[RecommendationService, Depends(get_recommendation_service_dep)],
+    current_user: Annotated[UserPublic | None, Depends(get_optional_user)],
+    top_k: Annotated[int, Query(ge=1, le=50)] = 5,
+) -> "app.schema.recommendation_schema.RecommendationResponse":
+    """Get product-based and user-aware recommendations for a product detail view."""
+    # Load product and derive an item identifier used by recommendation engine
+    product = product_service.get_product_by_slug(slug)
+    if not product:
+        return {
+            "user_id": current_user.id if current_user else None,
+            "recommendation_type": "product",
+            "recommendations": [],
+            "total_count": 0,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+    item_id = str(product.id)
+
+    # 1) Similar products based on content + collaborative signals
+    similar = rec_service.get_similar_products(product_id=item_id, top_k=top_k)
+
+    # 2) If user present, get personalized recommendations and merge
+    merged = []
+    seen = set()
+
+    for rec in similar:
+        if rec["item_id"] not in seen and rec["item_id"] != item_id:
+            seen.add(rec["item_id"])
+            merged.append(rec)
+
+    if current_user:
+        user_recs = rec_service.get_recommendations_for_user(
+            user_id=str(current_user.id), top_k=top_k, exclude_ids=[item_id]
+        )
+        for rec in user_recs:
+            if rec["item_id"] not in seen and rec["item_id"] != item_id:
+                seen.add(rec["item_id"])
+                merged.append(rec)
+
+    # Trim to top_k
+    merged = merged[:top_k]
+
+    return {
+        "user_id": str(current_user.id) if current_user else None,
+        "product_id": item_id,
+        "recommendation_type": "product",
+        "recommendations": merged,
+        "total_count": len(merged),
+        "timestamp": datetime.utcnow().isoformat(),
+    }

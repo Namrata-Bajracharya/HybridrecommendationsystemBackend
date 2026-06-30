@@ -26,9 +26,6 @@ class ProductCrud:
         try:
             create_data = create_dto.model_dump()
 
-            if isinstance(create_data.get("image_url"), HttpUrl):
-                create_data["image_url"] = str(create_data["image_url"])
-
             product_name = create_data.get("name")
             if not product_name:
                 raise ValueError("Product name is required for slug generation.")
@@ -242,9 +239,6 @@ class ProductCrud:
 
             if not update_data:
                 return self.get_product_by_id(id)
-
-            if isinstance(update_data.get("image_url"), HttpUrl):
-                update_data["image_url"] = str(update_data["image_url"])
 
             if "name" in update_data and "slug" not in update_data:
                 update_data["slug"] = generate_slug(self.db, update_data["name"])

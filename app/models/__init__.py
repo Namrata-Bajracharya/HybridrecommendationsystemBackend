@@ -9,3 +9,4 @@ from .payment import Payment
 from .product import Product
 from .review import Review
 from .wishlist import Wishlist
+from .document import Document

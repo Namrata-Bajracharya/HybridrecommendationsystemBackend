@@ -11,6 +11,8 @@ from sqlalchemy import (
 from sqlalchemy.ext.hybrid import hybrid_property
 from typing import List, Optional
 import datetime
+from sqlalchemy import String
+from sqlalchemy.orm import relationship
 
 
 class Product(Base):
@@ -25,8 +27,8 @@ class Product(Base):
     price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     stock_quantity: Mapped[int] = mapped_column(default=0)
     sku: Mapped[Optional[str]] = mapped_column(String(100), unique=True)
-    image_url: Mapped[Optional[str]] = mapped_column(String(500))
     category_id: Mapped[Optional[int]] = mapped_column(ForeignKey("categories.id"))
+    image_document_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         default=func.current_timestamp()
@@ -37,6 +39,7 @@ class Product(Base):
 
     # Relationships
     category: Mapped["Category"] = relationship("Category", back_populates="products")
+    document: Mapped[Optional["Document"]] = relationship("Document", primaryjoin="Product.image_document_id==foreign(Document.id)")
     cart_items: Mapped[List["CartItem"]] = relationship(
         "CartItem", back_populates="product", cascade="all, delete-orphan"
     )
@@ -49,6 +52,14 @@ class Product(Base):
     wishlist_items: Mapped[List["Wishlist"]] = relationship(
         "Wishlist", back_populates="product", cascade="all, delete-orphan"
     )
+
+    @property
+    def image_url(self) -> Optional[str]:
+        """Return the absolute path (or URL) of the associated document if present."""
+        doc = getattr(self, "document", None)
+        if doc:
+            return getattr(doc, "absolute_path", None) or getattr(doc, "relative_path", None)
+        return None
 
     @hybrid_property
     def average_rating(self) -> Optional[float]:

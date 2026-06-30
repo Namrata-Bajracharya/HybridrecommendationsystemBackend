@@ -17,6 +17,7 @@ class Category(Base):
     )
     description: Mapped[Optional[str]] = mapped_column(Text)
     image_url: Mapped[Optional[str]] = mapped_column(String(30))
+    image_document_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 
     # Relationships (self-referential)
     parent: Mapped[Optional["Category"]] = relationship(

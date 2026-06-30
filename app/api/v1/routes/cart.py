@@ -8,11 +8,57 @@ from app.services.cart_service import CartService
 from app.schema.cart_schema import CartItemCreate, CartItemUpdate, CartResponse
 from app.utils.session import generate_session_id
 from app.core.logger import logger
+from app.dependencies import get_recommendation_service_dep
+from app.services.recommendation_service import RecommendationService
+from datetime import datetime
 
 router = APIRouter(tags=["Cart"])
 
 cart_dependency = Annotated[CartService, Depends(get_cart_service_dep)]
 user_dep = Annotated[UserPublic | None, Depends(get_optional_user)]
+
+@router.get("/recommendations")
+async def get_cart_recommendations(
+    request: Request,
+    current_user: user_dep,
+    cart_service: cart_dependency,
+    rec_service: Annotated[RecommendationService, Depends(get_recommendation_service_dep)],
+):
+    """Return recommendations based on current cart items."""
+    # Resolve cart
+    if current_user:
+        session_id = request.cookies.get("session_id")
+        cart_service.merge_carts(current_user.id, session_id)
+        cart = cart_service.get_or_create_cart(user_id=current_user.id, session_id=None)
+    else:
+        session_id = request.cookies.get("session_id") or generate_session_id()
+        cart = cart_service.get_or_create_cart(user_id=None, session_id=session_id)
+
+    cart_details = cart_service.get_cart_details(cart=cart)
+    item_ids = [str(i["product_id"]) for i in cart_details.get("items", [])]
+
+    if not item_ids:
+        return {
+            "user_id": str(current_user.id) if current_user else None,
+            "recommendation_type": "cart",
+            "recommendations": [],
+            "total_count": 0,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+    recommendations = rec_service.get_cart_recommendations(
+        user_id=str(current_user.id) if current_user else None,
+        cart_items=item_ids,
+        top_k=5,
+    )
+
+    return {
+        "user_id": str(current_user.id) if current_user else None,
+        "recommendation_type": "cart",
+        "recommendations": recommendations,
+        "total_count": len(recommendations),
+        "timestamp": datetime.utcnow().isoformat(),
+    }
 
 
 @router.get("")

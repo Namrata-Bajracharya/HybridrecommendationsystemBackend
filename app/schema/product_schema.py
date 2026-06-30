@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field, HttpUrl, field_validator
 from typing import Optional
 from datetime import datetime
 import re
+from app.schema.category_schema import CategoryPublic
 
 
 class ProductBase(BaseModel):
@@ -9,13 +10,14 @@ class ProductBase(BaseModel):
     description: Optional[str] = None
     price: float = Field(..., gt=0)
     stock_quantity: Optional[int] = Field(0, ge=0)
-    image_url: Optional[HttpUrl] = None
+    image_document_id: Optional[str] = None
     category_id: Optional[int] = None
     is_active: Optional[bool] = True
 
 
 class ProductCreate(ProductBase):
     """Schema for creating a product."""
+    image_document_id: str
 
     model_config = {
         "json_schema_extra": {
@@ -40,7 +42,6 @@ class ProductUpdate(BaseModel):
     price: Optional[float] = Field(None, gt=0)
     stock_quantity: Optional[int] = Field(None, ge=0)
     sku: Optional[str] = Field(None, max_length=100)
-    image_url: Optional[HttpUrl] = None
     category_id: Optional[int] = None
     is_active: Optional[bool] = None
 
@@ -52,6 +53,8 @@ class ProductResponse(ProductBase):
     created_at: datetime
     slug: str
     sku: str
+    category: Optional[CategoryPublic] = None
+    image_url: Optional[str] = None
     average_rating: Optional[float] = Field(
         None, ge=0, le=5, description="Average rating from reviews (0-5)"
     )

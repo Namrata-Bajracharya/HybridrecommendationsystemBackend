@@ -5,22 +5,29 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import ProductException
 from app.core.logger import logger
-from app.core.redis import RedisClient
+# from app.core.redis import RedisClient
 from app.crud.category import CategoryCrud
 from app.crud.product import ProductCrud
+from app.crud.document import DocumentCrud
 from app.schema.product_schema import ProductCreate, ProductResponse, ProductUpdate
 from app.schema.common_schema import PaginatedResponse
 
 
 class ProductService:
-    def __init__(self, db: Session, redis: RedisClient):
+    def __init__(self, db: Session, redis=None):
         self.db = db
-        self.redis_client = redis
+        self.redis_client = redis  # Can be None (disabled for development)
         self.crud = ProductCrud(db=db)
 
     def create_product(self, create_dto: ProductCreate) -> ProductResponse:
         """Create a product and return a validated response model."""
         try:
+            # Validate associated image document exists
+            if getattr(create_dto, "image_document_id", None):
+                doc = DocumentCrud(self.db).get_by_id(create_dto.image_document_id)
+                if not doc:
+                    raise HTTPException(status_code=400, detail="Invalid image_document_id")
+
             result = self.crud.create_product(create_dto)
             return ProductResponse.model_validate(result)
         except ProductException as e:
@@ -46,16 +53,18 @@ class ProductService:
         return ProductResponse.model_validate(product)
 
     async def get_product_by_id(self, id: int) -> ProductResponse:
-        """Retrieve a product by id with caching."""
+        """Retrieve a product by id with caching (if redis is available)."""
         cache_key = f"product:{id}"
 
-        # Try cache first (store as JSON string for speed)
-        cached_json = await self.redis_client.get_json(cache_key)
-        if cached_json:
-            logger.info(
-                f"Cache hit for product: {id}",
-            )
-            return ProductResponse.model_validate_json(cached_json)
+        # Try cache first if redis is available (store as JSON string for speed)
+        if self.redis_client:
+            try:
+                cached_json = await self.redis_client.get_json(cache_key)
+                if cached_json:
+                    logger.info(f"Cache hit for product: {id}")
+                    return ProductResponse.model_validate_json(cached_json)
+            except Exception as e:
+                logger.warning(f"Cache error: {e}")
 
         logger.info("Cache miss for product:%s", id)
 
@@ -69,10 +78,14 @@ class ProductService:
 
         response_data = ProductResponse.model_validate(product_model)
 
-        # Cache for 10 minutes (adjust as needed)
-        await self.redis_client.set_json(
-            cache_key, response_data.model_dump_json(), ex=600
-        )
+        # Cache for 10 minutes if redis is available (adjust as needed)
+        if self.redis_client:
+            try:
+                await self.redis_client.set_json(
+                    cache_key, response_data.model_dump_json(), ex=600
+                )
+            except Exception as e:
+                logger.warning(f"Cache set error: {e}")
 
         return response_data
 

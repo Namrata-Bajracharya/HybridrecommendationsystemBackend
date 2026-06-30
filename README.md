@@ -1,3 +1,7 @@
+# command to RUN
+powershell -ExecutionPolicy Bypass -File .\run.ps1
+
+
 # FastAPI E-Commerce RESTFul API
 
 A robust and scalable RESTful API built with FastAPI for managing an e-commerce platform. This backend handles product catalogs, user authentication, shopping carts, order processing, and more.
@@ -35,10 +39,7 @@ A robust and scalable RESTful API built with FastAPI for managing an e-commerce 
 
 1.  **Clone the repository**
 
-    ```bash
-    git clone https://github.com/yourusername/fastapi-ecommerce.git
-    cd fastapi-ecommerce
-    ```
+  
 
 2.  **Create a virtual environment**
 
@@ -84,41 +85,6 @@ uvicorn app.main:app --reload
 
 The API will be available at `http://127.0.0.1:8000/api/v1`.
 
-## Using Poetry
-
-If you prefer using [Poetry](https://python-poetry.org/) for dependency management:
-
-1.  **Install dependencies**
-
-    ```bash
-    poetry install
-    ```
-
-2.  **Environment Configuration**
-
-    Ensure you have created the `.env` file as described in the [Installation](#installation) section.
-
-3.  **Run the application**
-
-    ```bash
-    poetry run uvicorn app.main:app --reload
-    ```
-
-## Docker Support
-
-You can also run the application using Docker.
-
-1.  **Build the image**
-
-    ```bash
-    docker build -t fastapi-ecommerce .
-    ```
-
-2.  **Run the container**
-
-    ```bash
-    docker run -d -p 8000:8000 fastapi-ecommerce
-    ```
 
 ## API Documentation
 

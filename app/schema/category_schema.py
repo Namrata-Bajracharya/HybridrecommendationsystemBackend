@@ -23,6 +23,7 @@ class CreateCategory(BaseModel):
     parent_id: int | None = None
     description: str | None = None
     image_url: HttpUrl | None = None
+    image_document_id: str | None = None
 
     model_config = {
         "json_schema_extra": {
@@ -65,6 +66,7 @@ class CategoryPublic(BaseModel):
     parent_id: int | None = None
     description: str | None = None
     image_url: HttpUrl | None = None
+    image_document_id: str | None = None
 
     model_config = {"from_attributes": True}
 
