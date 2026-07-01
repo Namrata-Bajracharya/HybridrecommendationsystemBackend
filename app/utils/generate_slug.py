@@ -3,11 +3,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 from app.models.product import Product
 from app.models.category import Category
+from app.models.collection import Collection
 from app.core.logger import logger
 from typing import Literal, Set
 import uuid
 
-SlugContext = Literal["product", "category"]
+SlugContext = Literal["product", "category", "collection"]
 
 
 def generate_slug(db: Session, name: str, context: SlugContext) -> str:
@@ -18,6 +19,8 @@ def generate_slug(db: Session, name: str, context: SlugContext) -> str:
         Model = Product
     elif context == "category":
         Model = Category
+    elif context == "collection":
+        Model = Collection
     else:
         raise ValueError(f"Invalid slug context: {context}")
 

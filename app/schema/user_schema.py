@@ -38,8 +38,18 @@ class TokenSchema(BaseModel):
 class LoginResponse(BaseModel):
     token: str
     token_type: str
+    refresh_token: str
     user: UserPublic
 
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
+class RefreshTokenResponse(BaseModel):
+    token: str
+    token_type: str
+    refresh_token: str
 
 
 class UserPublic(BaseModel):

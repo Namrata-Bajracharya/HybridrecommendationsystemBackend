@@ -1,5 +1,7 @@
+from __future__ import annotations
 from pydantic import BaseModel, Field, field_validator, ValidationInfo, HttpUrl
 from app.core.logger import logger
+from typing import Any
 import re
 
 # class Category(Base):
@@ -24,6 +26,7 @@ class CreateCategory(BaseModel):
     description: str | None = None
     image_url: HttpUrl | None = None
     image_document_id: str | None = None
+    fields: list[dict[str, Any]] | None = None
 
     model_config = {
         "json_schema_extra": {
@@ -67,6 +70,8 @@ class CategoryPublic(BaseModel):
     description: str | None = None
     image_url: HttpUrl | None = None
     image_document_id: str | None = None
+    fields: list[dict[str, Any]] | None = None
+    children: list[CategoryPublic] = []
 
     model_config = {"from_attributes": True}
 
@@ -77,6 +82,7 @@ class UpdateCategory(BaseModel):
     parent_id: int | None = None
     description: str | None = None
     image_url: HttpUrl | None = None
+    fields: list[dict[str, Any]] | None = None
 
     @field_validator("slug")
     def validate_slug(cls, v):

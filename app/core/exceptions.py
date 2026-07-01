@@ -12,3 +12,11 @@ class ProductException(Exception):
 
 class OrderException(Exception):
     pass
+
+
+class CollectionCreationError(Exception):
+    pass
+
+
+class CollectionUpdateError(Exception):
+    pass

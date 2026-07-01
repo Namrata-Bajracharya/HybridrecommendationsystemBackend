@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import ProductException
 from app.core.logger import logger
-# from app.core.redis import RedisClient
 from app.crud.category import CategoryCrud
 from app.crud.product import ProductCrud
 from app.crud.document import DocumentCrud
@@ -16,17 +15,21 @@ from app.schema.common_schema import PaginatedResponse
 class ProductService:
     def __init__(self, db: Session, redis=None):
         self.db = db
-        self.redis_client = redis  # Can be None (disabled for development)
+        self.redis_client = redis
         self.crud = ProductCrud(db=db)
 
     def create_product(self, create_dto: ProductCreate) -> ProductResponse:
         """Create a product and return a validated response model."""
         try:
-            # Validate associated image document exists
-            if getattr(create_dto, "image_document_id", None):
-                doc = DocumentCrud(self.db).get_by_id(create_dto.image_document_id)
-                if not doc:
-                    raise HTTPException(status_code=400, detail="Invalid image_document_id")
+            if create_dto.image_document_ids:
+                doc_crud = DocumentCrud(self.db)
+                for doc_id in create_dto.image_document_ids:
+                    doc = doc_crud.get_by_id(doc_id)
+                    if not doc:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Invalid document id: {doc_id}",
+                        )
 
             result = self.crud.create_product(create_dto)
             return ProductResponse.model_validate(result)
@@ -56,7 +59,6 @@ class ProductService:
         """Retrieve a product by id with caching (if redis is available)."""
         cache_key = f"product:{id}"
 
-        # Try cache first if redis is available (store as JSON string for speed)
         if self.redis_client:
             try:
                 cached_json = await self.redis_client.get_json(cache_key)
@@ -68,7 +70,6 @@ class ProductService:
 
         logger.info("Cache miss for product:%s", id)
 
-        # ← FIX: Must be await + async CRUD!
         product_model = self.crud.get_product_by_id(id)
 
         if not product_model:
@@ -78,7 +79,6 @@ class ProductService:
 
         response_data = ProductResponse.model_validate(product_model)
 
-        # Cache for 10 minutes if redis is available (adjust as needed)
         if self.redis_client:
             try:
                 await self.redis_client.set_json(
@@ -102,21 +102,7 @@ class ProductService:
         sort_by: str | None = "id",
         sort_order: str | None = "asc",
     ) -> PaginatedResponse[ProductResponse]:
-        """
-        List all products with advanced filtering and sorting.
-
-        Args:
-            page: Page number
-            per_page: Items per page
-            search: Search term for name/description
-            category_id: Filter by category
-            min_price: Minimum price
-            max_price: Maximum price
-            min_rating: Minimum average rating (0-5)
-            availability: Stock filter ('all', 'in_stock', 'out_of_stock')
-            sort_by: Sort field
-            sort_order: Sort direction ('asc' or 'desc')
-        """
+        """List all products with advanced filtering and sorting."""
         try:
             products = self.crud.get_all_products(
                 page,
@@ -141,6 +127,16 @@ class ProductService:
     def update_product(self, id: int, update_dto: ProductUpdate) -> ProductResponse:
         """Partially update a product; maps conflicts and not-found to HTTP codes."""
         try:
+            if update_dto.image_document_ids is not None:
+                doc_crud = DocumentCrud(self.db)
+                for doc_id in update_dto.image_document_ids:
+                    doc = doc_crud.get_by_id(doc_id)
+                    if not doc:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Invalid document id: {doc_id}",
+                        )
+
             updated = self.crud.update_product(id, update_dto)
             if not updated:
                 raise HTTPException(
@@ -184,41 +180,26 @@ class ProductService:
         return [ProductResponse.model_validate(p) for p in products]
 
     async def get_autocomplete_suggestions(self, query: str) -> List[str]:
-        """
-        Get product name suggestions for autocomplete with Redis caching.
-
-        Args:
-            query: Search query (minimum 2 characters)
-
-        Returns:
-            List of product name suggestions (max 10)
-        """
         if not query or len(query) < 2:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Query must be at least 2 characters",
             )
 
-        # Normalize query for cache key
         cache_key = f"autocomplete:{query.lower()}"
 
-        # Try cache first
         cached_suggestions = await self.redis_client.get_json(cache_key)
         if cached_suggestions:
             logger.info(f"Cache hit for autocomplete: {query}")
             import json
-
             return json.loads(cached_suggestions)
 
         logger.info(f"Cache miss for autocomplete: {query}")
 
-        # Get suggestions from database
         suggestions = self.crud.get_product_suggestions(query, limit=10)
 
-        # Cache for 1 hour (3600 seconds)
         if suggestions:
             import json
-
             await self.redis_client.set_json(
                 cache_key, json.dumps(suggestions), ex=3600
             )

@@ -56,6 +56,18 @@ class CategoryService:
                 detail="Failed to fetch categories.",
             )
 
+    def get_category_tree(self) -> list[CategoryPublic]:
+        """List only root categories with nested children."""
+        try:
+            roots = self.crud.get_root_categories()
+            return [CategoryPublic.model_validate(cat) for cat in roots]
+        except Exception as e:
+            logger.error(f"Error fetching category tree: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to fetch category tree.",
+            )
+
     def get_category_by_slug(self, slug: str) -> CategoryPublic:
         """Retrieve a category by slug; 404 if missing."""
         category = self.crud.get_category_by_slug(slug)

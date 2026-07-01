@@ -1,15 +1,21 @@
+import hashlib
+from datetime import timedelta, datetime, timezone
+
 from app.schema.user_schema import (
     CreateUserSchema,
     UserPublic,
     LoginSchema,
     LoginResponse,
+    RefreshTokenRequest,
+    RefreshTokenResponse,
     UpdateUserSchema,
 )
 from app.models.user import User
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from app.crud.user import UserCrud
-from app.utils.security import verify_password, create_token
+from app.crud.session import SessionCrud
+from app.utils.security import verify_password, create_token, generate_refresh_token
 
 
 class UserService:
@@ -72,15 +78,16 @@ class UserService:
 
     def login(self, user_login_data: LoginSchema) -> LoginResponse:
         """
-        Handle user login and generate an access token.
+        Handle user login and generate an access token and a refresh token.
 
-        This method authenticates the user and, if successful, creates a JWT access token.
+        This method authenticates the user and, if successful, creates a JWT access token
+        and a persistent refresh token stored in the sessions table.
 
         Parameters:
         - user_login_data (LoginSchema): The schema containing email and password for login.
 
         Returns:
-        - TokenSchema: The schema containing the JWT token and token type.
+        - LoginResponse: The schema containing the access token, token type, refresh token, and user.
 
         Raises:
         - HTTPException: 401 Unauthorized if authentication fails.
@@ -93,11 +100,57 @@ class UserService:
             )
         access_token_payload = {"sub": str(user.id)}
         access_token = create_token(data=access_token_payload)
-        # Return token and public user info so frontend can route by role
+        raw_refresh, hashed_refresh = generate_refresh_token()
+        refresh_expires = datetime.now(timezone.utc) + timedelta(days=7)
+        SessionCrud(self.db).create_session(
+            user_id=user.id,
+            refresh_token_hash=hashed_refresh,
+            expires_at=refresh_expires,
+        )
         return {
             "token": access_token,
             "token_type": "Bearer",
+            "refresh_token": raw_refresh,
             "user": UserPublic.model_validate(user),
+        }
+
+    def refresh(self, req: RefreshTokenRequest) -> RefreshTokenResponse:
+        """Exchange a refresh token for a new access token + new refresh token."""
+        hashed = hashlib.sha256(req.refresh_token.encode()).hexdigest()
+        session_crud = SessionCrud(self.db)
+        session = session_crud.get_by_refresh_hash(hashed)
+
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid refresh token",
+            )
+
+        now = datetime.now(timezone.utc)
+        user = self.crud.get_user(user_id=session.user_id)
+        if not user:
+            session_crud.revoke_session(session.id)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+            )
+
+        # If refresh token is expired but user/session is valid, still issue new tokens
+        session_crud.revoke_session(session.id)
+
+        raw_refresh, hashed_refresh = generate_refresh_token()
+        refresh_expires = now + timedelta(days=7)
+        session_crud.create_session(
+            user_id=user.id,
+            refresh_token_hash=hashed_refresh,
+            expires_at=refresh_expires,
+        )
+
+        access_token = create_token(data={"sub": str(user.id)})
+        return {
+            "token": access_token,
+            "token_type": "Bearer",
+            "refresh_token": raw_refresh,
         }
 
     def get_user_by_id(self, id: int) -> User:

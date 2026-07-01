@@ -1,3 +1,4 @@
+from .brand import Brand
 from .user import User
 from .address import Address
 from .cart_item import CartItem
@@ -10,3 +11,6 @@ from .product import Product
 from .review import Review
 from .wishlist import Wishlist
 from .document import Document
+from .session import Session
+from .collection import Collection
+from .product_image import ProductImage

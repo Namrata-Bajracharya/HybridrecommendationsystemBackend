@@ -1,16 +1,19 @@
+from pathlib import Path
 from pydantic import HttpUrl
 from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.exceptions import ProductException
 from app.core.logger import logger
 from app.models.category import Category
 from app.models.product import Product
+from app.models.product_image import ProductImage
 from app.schema.admin_schema import BulkInventoryUpdateItem, BulkInventoryUpdateResponse
 from app.schema.common_schema import PaginatedResponse, PaginationLinks, PaginationMeta
 from app.schema.product_schema import ProductCreate, ProductResponse, ProductUpdate
 from app.utils.generate_slug import generate_sku, generate_slug
+from app.services.document_service import DocumentService
 from typing import List, Literal
 
 allowed_sort_order = Literal["asc", "desc"]
@@ -24,7 +27,9 @@ class ProductCrud:
     def create_product(self, create_dto: ProductCreate) -> Product:
         """Create a new product with generated slug and sku."""
         try:
-            create_data = create_dto.model_dump()
+            create_data = create_dto.model_dump(exclude={"image_document_ids", "image_data_urls"})
+            image_document_ids = create_dto.image_document_ids or []
+            image_data_urls = create_dto.image_data_urls or []
 
             product_name = create_data.get("name")
             if not product_name:
@@ -34,8 +39,25 @@ class ProductCrud:
             gen_sku = generate_sku(product_name)
 
             product = Product(**create_data, slug=gen_slug, sku=gen_sku)
-
             self.db.add(product)
+            self.db.flush()
+
+            doc_service = DocumentService(self.db)
+            for i, data_url in enumerate(image_data_urls):
+                doc = doc_service.save_base64(data_url)
+                self.db.add(ProductImage(
+                    product_id=product.id,
+                    document_id=doc.id,
+                    sort_order=i,
+                ))
+
+            for i, doc_id in enumerate(image_document_ids):
+                self.db.add(ProductImage(
+                    product_id=product.id,
+                    document_id=doc_id,
+                    sort_order=len(image_data_urls) + i,
+                ))
+
             self.db.commit()
             self.db.refresh(product)
             return product
@@ -44,17 +66,24 @@ class ProductCrud:
             logger.info(f"exception: {e}")
             raise ProductException(str(e)) from e
 
+    def _load_images(self, product: Product) -> Product:
+        """Eagerly load images on a product instance."""
+        if not product.images:
+            stmt = select(Product).where(Product.id == product.id).options(joinedload(Product.images))
+            loaded = self.db.scalar(stmt)
+            if loaded:
+                product.images = loaded.images
+        return product
+
     def get_product_detail(self, slug: str) -> Product:
         """Retrieve a product by slug; returns None if not found."""
-        stmt = select(Product).where(Product.slug == slug)
+        stmt = select(Product).where(Product.slug == slug).options(joinedload(Product.images))
         product = self.db.scalar(stmt)
-        if not product:
-            return None
         return product
 
     def get_product_by_id(self, id: int) -> Product | None:
         """Retrieve a product by id; returns None if not found."""
-        stmt = select(Product).where(Product.id == id)
+        stmt = select(Product).where(Product.id == id).options(joinedload(Product.images))
         result = self.db.scalar(stmt)
         return result
 
@@ -73,18 +102,6 @@ class ProductCrud:
     ) -> PaginatedResponse[ProductResponse]:
         """
         List all products with advanced filtering and sorting.
-
-        Args:
-            page: Page number (1-indexed)
-            per_page: Items per page (1-100)
-            search: Search term for name and description
-            category_id: Filter by category
-            min_price: Minimum price filter
-            max_price: Maximum price filter
-            min_rating: Minimum average rating (0-5)
-            availability: Filter by stock ('all', 'in_stock', 'out_of_stock')
-            sort_by: Field to sort by
-            sort_order: Sort direction ('asc' or 'desc')
         """
         logger.info(f"page: {page} - per_page: {per_page}")
         logger.info(
@@ -94,10 +111,8 @@ class ProductCrud:
         page = max(page, 1)
         per_page = max(min(per_page, 100), 1)
 
-        # Base query - only active products
-        stmt = select(Product).where(Product.is_active == True)
+        stmt = select(Product).where(Product.is_active == True).options(joinedload(Product.images))
 
-        # Search filter (case-insensitive full-text search)
         if search:
             search_pattern = f"%{search}%"
             stmt = stmt.where(
@@ -105,28 +120,22 @@ class ProductCrud:
                 | Product.description.ilike(search_pattern)
             )
 
-        # Category filter
         if category_id:
             stmt = stmt.where(Product.category_id == category_id)
 
-        # Price range filters
         if min_price is not None:
             stmt = stmt.where(Product.price >= min_price)
         if max_price is not None:
             stmt = stmt.where(Product.price <= max_price)
 
-        # Rating filter (using hybrid property)
         if min_rating is not None:
             stmt = stmt.where(Product.average_rating >= min_rating)
 
-        # Availability filter
         if availability == "in_stock":
             stmt = stmt.where(Product.in_stock == True)
         elif availability == "out_of_stock":
             stmt = stmt.where(Product.in_stock == False)
-        # 'all' - no filter needed
 
-        # Sorting
         from app.models.order_item import OrderItem
 
         allowed_sorting_fields = {
@@ -149,13 +158,11 @@ class ProductCrud:
         else:
             stmt = stmt.order_by(sort_field.asc())
 
-        # Count total items matching filters
         count_stmt = stmt.with_only_columns(func.count())
         total_items = self.db.scalar(count_stmt)
 
-        # Pagination
         offset = (page - 1) * per_page
-        items = self.db.scalars(stmt.offset(offset).limit(per_page)).all()
+        items = self.db.scalars(stmt.offset(offset).limit(per_page)).unique().all()
 
         total_pages = (total_items + per_page - 1) // per_page
         from_item = offset + 1 if items else None
@@ -170,7 +177,6 @@ class ProductCrud:
             to_item=to_item,
         )
 
-        # Build query string for HATEOAS links
         base = "/products"
         query_params = []
         if search:
@@ -219,38 +225,82 @@ class ProductCrud:
         stmt = (
             select(Product)
             .where(Product.category_id == category_id)
+            .options(joinedload(Product.images))
             .order_by(Product.id)
         )
-        return self.db.scalars(stmt).all()
+        return self.db.scalars(stmt).unique().all()
 
     def get_products_by_category_slug(self, slug: str) -> list[Product]:
         stmt = (
             select(Product)
             .join(Category, Product.category_id == Category.id)
             .where(Category.slug == slug)
+            .options(joinedload(Product.images))
             .order_by(Product.id)
         )
-        return self.db.scalars(stmt).all()
+        return self.db.scalars(stmt).unique().all()
 
     def update_product(self, id: int, update_dto: ProductUpdate) -> Product | None:
         """Partially update product; auto-generate slug when name changes."""
         try:
-            update_data = update_dto.model_dump(exclude_unset=True)
+            update_data = update_dto.model_dump(exclude_unset=True, exclude={"image_document_ids", "image_data_urls"})
+            image_document_ids = getattr(update_dto, "image_document_ids", None)
+            image_data_urls = getattr(update_dto, "image_data_urls", None)
+            has_image_changes = image_document_ids is not None or image_data_urls is not None
 
-            if not update_data:
+            if not update_data and not has_image_changes:
                 return self.get_product_by_id(id)
 
             if "name" in update_data and "slug" not in update_data:
                 update_data["slug"] = generate_slug(self.db, update_data["name"])
 
-            stmt = (
-                update(Product)
-                .where(Product.id == id)
-                .values(**update_data)
-                .returning(Product)
-            )
+            if update_data:
+                stmt = (
+                    update(Product)
+                    .where(Product.id == id)
+                    .values(**update_data)
+                    .returning(Product)
+                )
+                updated = self.db.execute(stmt).scalar_one_or_none()
+            else:
+                updated = self.get_product_by_id(id)
 
-            updated = self.db.execute(stmt).scalar_one_or_none()
+            if updated and has_image_changes:
+                from app.models.document import Document
+                old_docs = [
+                    pi.document_id
+                    for pi in self.db.execute(
+                        select(ProductImage.document_id).where(ProductImage.product_id == id)
+                    ).scalars()
+                ]
+                removed_ids = set(old_docs) - set(image_document_ids or [])
+                for did in removed_ids:
+                    doc = self.db.get(Document, did)
+                    if doc:
+                        fpath = Path(doc.absolute_path)
+                        if fpath.exists() and fpath.is_file():
+                            fpath.unlink()
+                        self.db.delete(doc)
+
+                doc_service = DocumentService(self.db)
+                self.db.execute(delete(ProductImage).where(ProductImage.product_id == id))
+                sort = 0
+                for data_url in (image_data_urls or []):
+                    doc = doc_service.save_base64(data_url)
+                    self.db.add(ProductImage(
+                        product_id=id,
+                        document_id=doc.id,
+                        sort_order=sort,
+                    ))
+                    sort += 1
+                for doc_id in (image_document_ids or []):
+                    self.db.add(ProductImage(
+                        product_id=id,
+                        document_id=doc_id,
+                        sort_order=sort,
+                    ))
+                    sort += 1
+
             self.db.commit()
             return updated
         except IntegrityError as e:
@@ -269,21 +319,13 @@ class ProductCrud:
     def get_product_suggestions(self, query: str, limit: int = 10) -> list[str]:
         """
         Get product name suggestions for autocomplete.
-
-        Args:
-            query: Search query (minimum 2 characters)
-            limit: Maximum number of suggestions (default 10)
-
-        Returns:
-            List of product names matching the query
         """
         if not query or len(query) < 2:
             return []
 
-        search_pattern = f"{query}%"  # Prefix matching
-        contains_pattern = f"%{query}%"  # Contains matching
+        search_pattern = f"{query}%"
+        contains_pattern = f"%{query}%"
 
-        # Get products that start with the query (higher priority)
         stmt_prefix = (
             select(Product.name)
             .where(Product.is_active == True)
@@ -294,24 +336,21 @@ class ProductCrud:
 
         prefix_matches = self.db.scalars(stmt_prefix).all()
 
-        # If we have enough prefix matches, return them
         if len(prefix_matches) >= limit:
             return list(prefix_matches)[:limit]
 
-        # Otherwise, get additional matches that contain the query
         remaining = limit - len(prefix_matches)
         stmt_contains = (
             select(Product.name)
             .where(Product.is_active == True)
             .where(Product.name.ilike(contains_pattern))
-            .where(~Product.name.ilike(search_pattern))  # Exclude prefix matches
+            .where(~Product.name.ilike(search_pattern))
             .distinct()
             .limit(remaining)
         )
 
         contains_matches = self.db.scalars(stmt_contains).all()
 
-        # Combine results: prefix matches first, then contains matches
         return list(prefix_matches) + list(contains_matches)
 
     def deduct_stock(self, product_id: int, item_quantity: int):

@@ -1,5 +1,5 @@
 from pydantic import HttpUrl
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from app.core.exceptions import CategoryCreationError, CategoryUpdateError
 from app.models.category import Category
 from app.schema.category_schema import CategoryPublic, CreateCategory, UpdateCategory
@@ -90,6 +90,16 @@ class CategoryCrud:
 
     def get_all_categories(self) -> list[Category]:
         """List all categories ordered by id."""
-        stmt = select(Category).order_by(Category.id)
+        stmt = select(Category).options(selectinload(Category.children)).order_by(Category.id)
         result = self.db.scalars(stmt).all()
         return result
+
+    def get_root_categories(self) -> list[Category]:
+        """List only root categories (parent_id is None)."""
+        stmt = (
+            select(Category)
+            .options(selectinload(Category.children))
+            .where(Category.parent_id.is_(None))
+            .order_by(Category.id)
+        )
+        return list(self.db.scalars(stmt).all())

@@ -4,6 +4,7 @@ from app.api.v1.routes import (
     admin,
     cart,
     category,
+    collection,
     document,
     # elastic,  # DISABLED: Not required for development
     healthcheck,
@@ -32,4 +33,5 @@ def init_routes(app: FastAPI):
     app.include_router(router=wishlist.router, prefix="/wishlist")
     app.include_router(router=recommendation.router, prefix="/api/v1")  # Already has /recommendations prefix
     # app.include_router(router=elastic.router, prefix="/elastic")  # DISABLED: Not required
+    app.include_router(router=collection.router, prefix="/collection")
     app.include_router(router=test.router, prefix="/test")

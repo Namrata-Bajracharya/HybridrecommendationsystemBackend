@@ -7,6 +7,8 @@ from app.schema.user_schema import (
     CreateUserSchema,
     LoginSchema,
     LoginResponse,
+    RefreshTokenRequest,
+    RefreshTokenResponse,
     UserPublic,
     UpdateUserSchema,
     DeleteUserResponseModel,
@@ -82,6 +84,19 @@ async def login(
     - HTTPException: If credentials are invalid (e.g., 401 Unauthorized).
     """
     return user_service.login(user_login_data=user_login_data)
+
+
+@router.post(
+    "/refresh",
+    response_model=RefreshTokenResponse,
+    summary="Refresh token",
+    description="Exchange a refresh token for a new access token and a new refresh token.",
+)
+async def refresh_token(
+    req: RefreshTokenRequest,
+    user_service: user_dependency,
+) -> RefreshTokenResponse:
+    return user_service.refresh(req)
 
 
 @router.get(

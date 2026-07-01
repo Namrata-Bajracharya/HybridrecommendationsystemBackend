@@ -1,10 +1,11 @@
+import secrets
+import hashlib
 from pwdlib import PasswordHash
 from datetime import timedelta, datetime, timezone
 from typing import Dict, Optional, Any
 import jwt
 from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
 from app.core.config import settings
-# TokenSchema not required here
 
 # implement password hashing
 password_hash = PasswordHash.recommended()
@@ -93,5 +94,16 @@ def decode_access_token(token: str) -> Dict[str, Any]:
         raise TokenError("Token has expired")
     except InvalidTokenError:
         raise TokenError("Invalid token")
-    except jwt.DecodeError:  # Covers other decode issues
+    except jwt.DecodeError:
         raise TokenError("Malformed token")
+
+
+def generate_refresh_token() -> tuple[str, str]:
+    """Generate a secure refresh token and its SHA-256 hash.
+
+    Returns:
+        Tuple of (raw_token, hashed_token).
+    """
+    raw = secrets.token_hex(32)
+    hashed = hashlib.sha256(raw.encode()).hexdigest()
+    return raw, hashed

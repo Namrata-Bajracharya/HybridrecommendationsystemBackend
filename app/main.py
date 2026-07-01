@@ -1,9 +1,10 @@
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
+from pathlib import Path
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
@@ -175,6 +176,21 @@ async def read_root():
     return RootResponse(
         message="Welcome to the KALLEE E-Commerce API v1. Check out /docs for the API specification!"
     )
+
+
+UPLOADS_DIR = Path(__file__).parent.parent / "uploads"
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@app.get("/upload/{file_path:path}")
+async def serve_upload(file_path: str):
+    full_path = (UPLOADS_DIR / file_path).resolve()
+    # Ensure the resolved path is within UPLOADS_DIR (security check)
+    if not str(full_path).startswith(str(UPLOADS_DIR.resolve())):
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
+    if full_path.exists() and full_path.is_file():
+        return FileResponse(str(full_path))
+    return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
 
 # Register all API routes

@@ -46,3 +46,6 @@ class User(Base):
     wishlist_items: Mapped[List["Wishlist"]] = relationship(
         "Wishlist", back_populates="user", cascade="all, delete-orphan"
     )
+    sessions: Mapped[List["Session"]] = relationship(
+        "Session", back_populates="user", cascade="all, delete-orphan"
+    )

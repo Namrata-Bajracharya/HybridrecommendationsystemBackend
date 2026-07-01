@@ -37,13 +37,26 @@ async def create_category(
     "",
     response_model=List[CategoryPublic],
     summary="List categories",
-    description="Returns all categories.",
+    description="Returns all categories (flat list).",
 )
 async def get_all_categories(
     category_service: category_dependency,
 ):
     """List all categories."""
     return category_service.get_all_categories()
+
+
+@router.get(
+    "/tree",
+    response_model=List[CategoryPublic],
+    summary="Category tree",
+    description="Returns root categories with nested children.",
+)
+async def get_category_tree(
+    category_service: category_dependency,
+):
+    """List root categories with children nested."""
+    return category_service.get_category_tree()
 
 
 @router.get(

@@ -79,7 +79,7 @@ class WishlistService:
                     product_name=item.product.name,
                     product_slug=item.product.slug,
                     product_price=float(item.product.price),
-                    product_image_url=item.product.image_url,
+                    product_image_url=item.product.images[0].document.relative_path if item.product.images and item.product.images[0].document else None,
                     product_stock_quantity=item.product.stock_quantity,
                     product_is_active=item.product.is_active,
                     added_at=item.created_at,

@@ -21,6 +21,7 @@ from app.services.product_service import ProductService
 from app.services.recommendation_service import RecommendationService
 from app.services.review_service import ReviewService
 from app.services.user_service import UserService
+from app.services.collection_service import CollectionService
 from app.services.document_service import DocumentService
 from app.utils.security import TokenError, decode_access_token
 
@@ -103,6 +104,10 @@ def get_recommendation_service_dep(
     Loads ML model and training data for hybrid recommendations
     """
     return RecommendationService(db=db)
+
+
+def get_collection_service_dep(db: Session = Depends(get_db)) -> CollectionService:
+    return CollectionService(db=db)
 
 
 def get_document_service_dep(db: Annotated[Session, Depends(get_db)]) -> DocumentService:

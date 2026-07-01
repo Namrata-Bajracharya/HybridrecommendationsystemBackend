@@ -17,3 +17,11 @@ class DocumentCrud:
 
     def get_by_id(self, id: str) -> Document | None:
         return self.db.get(Document, id)
+
+    def delete(self, id: str) -> bool:
+        doc = self.db.get(Document, id)
+        if not doc:
+            return False
+        self.db.delete(doc)
+        self.db.commit()
+        return True

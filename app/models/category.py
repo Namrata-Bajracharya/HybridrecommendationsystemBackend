@@ -1,6 +1,6 @@
-from sqlalchemy import Integer, String, Text, ForeignKey
+from sqlalchemy import Integer, String, Text, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from typing import Optional, List
+from typing import Optional, List, Any
 from app.db.database import Base
 
 
@@ -18,6 +18,7 @@ class Category(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     image_url: Mapped[Optional[str]] = mapped_column(String(30))
     image_document_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    fields: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
 
     # Relationships (self-referential)
     parent: Mapped[Optional["Category"]] = relationship(
