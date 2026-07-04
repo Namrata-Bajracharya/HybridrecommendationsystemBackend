@@ -7,8 +7,10 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.exceptions import ProductException
 from app.core.logger import logger
 from app.models.category import Category
+from app.models.document import Document
 from app.models.product import Product
 from app.models.product_image import ProductImage
+from app.models.product_variant import ProductVariant
 from app.schema.admin_schema import BulkInventoryUpdateItem, BulkInventoryUpdateResponse
 from app.schema.common_schema import PaginatedResponse, PaginationLinks, PaginationMeta
 from app.schema.product_schema import ProductCreate, ProductResponse, ProductUpdate
@@ -77,13 +79,13 @@ class ProductCrud:
 
     def get_product_detail(self, slug: str) -> Product:
         """Retrieve a product by slug; returns None if not found."""
-        stmt = select(Product).where(Product.slug == slug).options(joinedload(Product.images))
+        stmt = select(Product).where(Product.slug == slug).options(joinedload(Product.images), joinedload(Product.variants))
         product = self.db.scalar(stmt)
         return product
 
     def get_product_by_id(self, id: int) -> Product | None:
         """Retrieve a product by id; returns None if not found."""
-        stmt = select(Product).where(Product.id == id).options(joinedload(Product.images))
+        stmt = select(Product).where(Product.id == id).options(joinedload(Product.images), joinedload(Product.variants))
         result = self.db.scalar(stmt)
         return result
 
@@ -111,30 +113,30 @@ class ProductCrud:
         page = max(page, 1)
         per_page = max(min(per_page, 100), 1)
 
-        stmt = select(Product).where(Product.is_active == True).options(joinedload(Product.images))
+        base_conditions = [Product.is_active == True]
 
         if search:
             search_pattern = f"%{search}%"
-            stmt = stmt.where(
+            base_conditions.append(
                 Product.name.ilike(search_pattern)
                 | Product.description.ilike(search_pattern)
             )
 
         if category_id:
-            stmt = stmt.where(Product.category_id == category_id)
+            base_conditions.append(Product.category_id == category_id)
 
         if min_price is not None:
-            stmt = stmt.where(Product.price >= min_price)
+            base_conditions.append(Product.price >= min_price)
         if max_price is not None:
-            stmt = stmt.where(Product.price <= max_price)
+            base_conditions.append(Product.price <= max_price)
 
         if min_rating is not None:
-            stmt = stmt.where(Product.average_rating >= min_rating)
+            base_conditions.append(Product.average_rating >= min_rating)
 
         if availability == "in_stock":
-            stmt = stmt.where(Product.in_stock == True)
+            base_conditions.append(Product.in_stock == True)
         elif availability == "out_of_stock":
-            stmt = stmt.where(Product.in_stock == False)
+            base_conditions.append(Product.in_stock == False)
 
         from app.models.order_item import OrderItem
 
@@ -153,13 +155,12 @@ class ProductCrud:
         }
 
         sort_field = allowed_sorting_fields.get(sort_by, Product.id)
-        if sort_order == "desc":
-            stmt = stmt.order_by(sort_field.desc())
-        else:
-            stmt = stmt.order_by(sort_field.asc())
+        order = sort_field.desc() if sort_order == "desc" else sort_field.asc()
 
-        count_stmt = stmt.with_only_columns(func.count())
+        count_stmt = select(func.count(Product.id)).where(*base_conditions)
         total_items = self.db.scalar(count_stmt)
+
+        stmt = select(Product).where(*base_conditions).options(joinedload(Product.images), joinedload(Product.variants)).order_by(order)
 
         offset = (page - 1) * per_page
         items = self.db.scalars(stmt.offset(offset).limit(per_page)).unique().all()
@@ -225,7 +226,7 @@ class ProductCrud:
         stmt = (
             select(Product)
             .where(Product.category_id == category_id)
-            .options(joinedload(Product.images))
+            .options(joinedload(Product.images), joinedload(Product.variants))
             .order_by(Product.id)
         )
         return self.db.scalars(stmt).unique().all()
@@ -235,7 +236,7 @@ class ProductCrud:
             select(Product)
             .join(Category, Product.category_id == Category.id)
             .where(Category.slug == slug)
-            .options(joinedload(Product.images))
+            .options(joinedload(Product.images), joinedload(Product.variants))
             .order_by(Product.id)
         )
         return self.db.scalars(stmt).unique().all()
@@ -308,11 +309,34 @@ class ProductCrud:
             raise ProductException(str(e)) from e
 
     def delete_product(self, id: int) -> bool:
-        """Delete product by id. Returns True if deleted else False."""
-        stmt = delete(Product).where(Product.id == id)
-        result = self.db.execute(stmt)
-        if result.rowcount == 0:
+        """Delete product by id. Cleans up associated document records and files."""
+        from app.models.document import Document
+
+        product = self.db.get(Product, id)
+        if not product:
             return False
+
+        doc_ids = set()
+
+        for pi in product.images:
+            if pi.document_id:
+                doc_ids.add(pi.document_id)
+
+        for v in product.variants:
+            if v.image_document_id:
+                doc_ids.add(v.image_document_id)
+
+        self.db.delete(product)
+        self.db.flush()
+
+        if doc_ids:
+            docs = self.db.scalars(select(Document).where(Document.id.in_(doc_ids))).all()
+            for doc in docs:
+                fpath = Path(doc.absolute_path)
+                if fpath.exists() and fpath.is_file():
+                    fpath.unlink()
+                self.db.delete(doc)
+
         self.db.commit()
         return True
 

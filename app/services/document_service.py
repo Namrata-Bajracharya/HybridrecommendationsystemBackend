@@ -1,9 +1,11 @@
 import base64
+import io
 import mimetypes
 from pathlib import Path
 from fastapi import UploadFile
 from uuid import uuid4
 from datetime import datetime
+from PIL import Image
 from app.core.logger import logger
 from app.crud.document import DocumentCrud
 
@@ -65,7 +67,9 @@ class DocumentService:
         return self.crud.delete(doc_id)
 
     def _save_bytes(self, content: bytes, filename: str, mime_type: str | None) -> dict:
-        """Write raw bytes to disk under upload/YYYY/MM and return Document dict."""
+        """Write raw bytes to disk under upload/YYYY/MM and return Document dict.
+        Compresses images (JPEG, PNG, WebP) to reduce file size with minimal quality loss.
+        """
         now = datetime.utcnow()
         year = str(now.year)
         month = f"{now.month:02d}"
@@ -76,6 +80,13 @@ class DocumentService:
         stored_name = f"{now.strftime('%Y%m%d_%H%M%S')}_{uuid4().hex}{ext}"
         rel_path = Path("upload") / year / month / stored_name
         abs_path = (dest_dir / stored_name).resolve()
+
+        content, mime_type, ext = self._compress_image(content, mime_type)
+
+        if ext:
+            stored_name = f"{now.strftime('%Y%m%d_%H%M%S')}_{uuid4().hex}{ext}"
+            rel_path = Path("upload") / year / month / stored_name
+            abs_path = (dest_dir / stored_name).resolve()
 
         with open(abs_path, "wb") as f:
             f.write(content)
@@ -92,3 +103,40 @@ class DocumentService:
 
         doc = self.crud.create_document(data)
         return doc
+
+    def _compress_image(self, content: bytes, mime_type: str | None) -> tuple[bytes, str | None, str | None]:
+        """Compress image bytes with minimal quality loss and significant size reduction."""
+        if not mime_type or not mime_type.startswith("image/"):
+            return content, mime_type, None
+
+        try:
+            img = Image.open(io.BytesIO(content))
+            buf = io.BytesIO()
+            save_ext = None
+
+            if mime_type == "image/jpeg":
+                if img.mode in ("RGBA", "P"):
+                    img = img.convert("RGB")
+                img.save(buf, format="JPEG", quality=85, optimize=True, progressive=True)
+                save_ext = ".jpg"
+            elif mime_type == "image/png":
+                if img.mode != "RGBA":
+                    img = img.convert("RGBA")
+                img.save(buf, format="PNG", optimize=True, compress_level=9)
+                save_ext = ".png"
+            elif mime_type == "image/webp":
+                img.save(buf, format="WEBP", quality=85, method=6)
+                save_ext = ".webp"
+            else:
+                if img.mode in ("RGBA", "P"):
+                    img = img.convert("RGB")
+                img.save(buf, format=img.format or "JPEG", optimize=True)
+                save_ext = Path(f".{img.format.lower()}" if img.format else ".jpg").suffix
+
+            compressed = buf.getvalue()
+            if len(compressed) < len(content):
+                return compressed, mime_type, save_ext
+            return content, mime_type, None
+        except Exception as e:
+            logger.warning(f"Image compression failed for {mime_type}, saving raw: {e}")
+            return content, mime_type, None

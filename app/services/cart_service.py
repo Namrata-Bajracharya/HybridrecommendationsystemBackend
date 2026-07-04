@@ -35,28 +35,41 @@ class CartService:
         except Exception as e:
             logger.info(f"exception: {e}")
 
+    def _resolve_price(self, product, variant_id: int | None = None) -> float:
+        if variant_id:
+            variant = next((v for v in (product.variants or []) if v.id == variant_id), None)
+            if variant and variant.price is not None:
+                return variant.price
+        return float(product.price)
+
+    def _resolve_stock(self, product, variant_id: int | None = None) -> int:
+        if variant_id:
+            variant = next((v for v in (product.variants or []) if v.id == variant_id), None)
+            if variant:
+                return variant.stock_quantity
+        return product.stock_quantity
+
     def add_item(self, cart: Cart, data: CartItemCreate):
         product = self.prod_crud.get_product_by_id(data.product_id)
         if not product:
             raise ProductException("product not found")
-        if product.stock_quantity < data.quantity:
+        stock = self._resolve_stock(product, data.variant_id)
+        if stock < data.quantity:
             raise ProductException("Product out of stock")
 
-        # stmt = select(CartItem).where(
-        #     CartItem.cart_id == cart.id, CartItem.product_id == data.product_id
-        # )
-
-        # existing = self.db.scalar(stmt)
-        existing = self.cart_crud.get_cart_item_by_product(cart.id, product.id)
+        existing = self.cart_crud.get_cart_item_by_product(
+            cart.id, product.id, data.variant_id
+        )
 
         if existing:
             result = self.cart_crud.update_existing_cart_item(
-                cart.id, product.id, data.quantity
+                cart.id, product.id, data.variant_id, data.quantity
             )
             return result
 
         new_item = self.cart_crud.add_new_cart_item(
-            cart_id=cart.id, product_id=product.id, quantity=data.quantity
+            cart_id=cart.id, product_id=product.id,
+            quantity=data.quantity, variant_id=data.variant_id,
         )
         return new_item
 
@@ -84,15 +97,17 @@ class CartService:
 
         for item in cart.cart_items:
             product = item.product
-            item_sub = product.price * item.quantity
+            unit_price = self._resolve_price(product, item.variant_id)
+            item_sub = unit_price * item.quantity
 
             items.append(
                 {
                     "id": item.id,
                     "product_id": product.id,
+                    "variant_id": item.variant_id,
                     "quantity": item.quantity,
                     "product_name": product.name,
-                    "unit_price": product.price,
+                    "unit_price": unit_price,
                     "subtotal": item_sub,
                 }
             )
@@ -125,7 +140,7 @@ class CartService:
 
         for item in anon_cart.cart_items:
             existing = self.cart_crud.get_cart_item_by_product(
-                user_cart.id, item.product_id
+                user_cart.id, item.product_id, item.variant_id
             )
 
             if existing:

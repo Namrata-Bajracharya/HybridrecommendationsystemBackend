@@ -13,7 +13,9 @@ from app.api.v1.routes import (
     product,
     recommendation,
     review,
+    shipping,
     user,
+    variant,
     wishlist,
     test,
 )
@@ -31,7 +33,9 @@ def init_routes(app: FastAPI):
     app.include_router(router=payment.router, prefix="/payments")
     app.include_router(router=admin.router, prefix="/admin")
     app.include_router(router=wishlist.router, prefix="/wishlist")
-    app.include_router(router=recommendation.router, prefix="/api/v1")  # Already has /recommendations prefix
+    app.include_router(router=shipping.router)         # root_path supplies /api/v1
+    app.include_router(router=recommendation.router)   # root_path supplies /api/v1; router has its own /recommendations prefix
     # app.include_router(router=elastic.router, prefix="/elastic")  # DISABLED: Not required
-    app.include_router(router=collection.router, prefix="/collection")
+    app.include_router(router=collection.router, prefix="/collections")
+    app.include_router(router=variant.router)          # root_path supplies /api/v1
     app.include_router(router=test.router, prefix="/test")

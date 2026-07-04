@@ -14,6 +14,7 @@ from app.schema.user_schema import UserPublic
 from app.services.address_service import AddressService
 from app.services.cart_service import CartService
 from app.services.category_service import CategoryService
+from app.services import shipping_service
 # from app.services.elasticsearch_service import ElasticService
 from app.services.order_service import OrderService
 from app.services.payment_service import PaymentService

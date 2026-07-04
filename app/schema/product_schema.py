@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, Any
 from datetime import datetime
 from app.schema.category_schema import CategoryPublic
+from app.schema.variant_schema import VariantPublic
 
 
 class DocumentRef(BaseModel):
@@ -79,6 +80,7 @@ class ProductResponse(ProductBase):
     images: list[ProductImagePublic] = []
     average_rating: Optional[float] = Field(None, ge=0, le=5, description="Average rating from reviews (0-5)")
     review_count: int = Field(default=0, ge=0, description="Total number of reviews")
+    variants: list[VariantPublic] = Field(default=[], description="Product variants (color/size/shape options)")
     in_stock: bool = Field(description="Whether product is currently in stock")
 
     model_config = {

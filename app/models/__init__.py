@@ -14,3 +14,4 @@ from .document import Document
 from .session import Session
 from .collection import Collection
 from .product_image import ProductImage
+from .product_variant import ProductVariant

@@ -11,6 +11,10 @@ class AddressService:
         self.db = db
         self.crud = AddressCrud(db=db)
 
+    def list_addresses(self, user_id: int) -> list[AddressPublic]:
+        addresses = self.crud.get_addresses_by_user(user_id)
+        return [AddressPublic.model_validate(a) for a in addresses]
+
     def add_address(
         self, user_id: int, is_first: bool, address_data: AddressCreate
     ) -> AddressPublic:
@@ -22,7 +26,7 @@ class AddressService:
     ) -> AddressPublic:
         address = self.crud.get_single_address(address_id)
         if not address:
-            raise HTTPException(status_code=s, detail="Address not found")
+            raise HTTPException(status_code=404, detail="Address not found")
         update_address_data = address_data.model_dump(exclude_unset=True)
         try:
             if update_address_data.get("is_default"):

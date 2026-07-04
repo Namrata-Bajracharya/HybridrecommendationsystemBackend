@@ -7,6 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -14,6 +15,8 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from app.api.v1.init_routes import init_routes
 from app.core.logger import logger
 from app.middleware.request_logger import LoggingMiddleware
+from app.websocket_manager import manager
+from fastapi import WebSocket, WebSocketDisconnect
 
 # DB/user seeding
 from app.db.database import SessionLocal
@@ -21,14 +24,45 @@ from app.crud.user import UserCrud
 from app.schema.user_schema import CreateUserSchema
 
 
+def add_missing_columns(db):
+    """Add columns that may not exist on existing SQLite tables."""
+    migs = [
+        ("addresses", "district", "VARCHAR(100)"),
+        ("addresses", "zone", "VARCHAR(100)"),
+        ("users", "shop_name", "VARCHAR(200)"),
+        ("users", "shop_latitude", "FLOAT"),
+        ("users", "shop_longitude", "FLOAT"),
+        ("users", "shop_district", "VARCHAR(100)"),
+        ("users", "shop_zone", "VARCHAR(100)"),
+        ("orders", "contact_name", "VARCHAR(200)"),
+        ("orders", "contact_phone", "VARCHAR(50)"),
+        ("orders", "contact_email", "VARCHAR(255)"),
+        ("orders", "payment_mode", "VARCHAR(50)"),
+        ("orders", "shipping_cost", "NUMERIC(10,2)"),
+        ("orders", "tax", "NUMERIC(10,2)"),
+        ("orders", "discount", "NUMERIC(10,2)"),
+        ("orders", "cancel_reason", "VARCHAR(500)"),
+        ("orders", "cancelled_by", "VARCHAR(50)"),
+        ("orders", "refund_reason", "VARCHAR(500)"),
+    ]
+    for table, col, coltype in migs:
+        try:
+            db.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}"))
+            db.commit()
+            logger.info("Added column %s.%s", table, col)
+        except Exception:
+            db.rollback()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Application starting...")
 
-    # Startup tasks go here
-    # Seed default admin user if missing
     db = SessionLocal()
     try:
+        add_missing_columns(db)
+
+        # Seed default admin user if missing
         try:
             user_crud = UserCrud(db=db)
             admin_email = "admin@kallee.com"
@@ -42,10 +76,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     phone="",
                 )
                 created = user_crud.create_user(admin_data)
-                # ensure role is admin
                 created.role = "admin"
+                created.is_verified = True
+                created.shop_name = "Kallee Nepal"
+                created.shop_latitude = 27.7172
+                created.shop_longitude = 85.3240
+                created.shop_district = "Kathmandu"
+                created.shop_zone = "Bagmati"
                 db.commit()
                 logger.info("Created default admin user: %s", admin_email)
+            else:
+                # Update existing admin with shop info if not set
+                existing.shop_name = existing.shop_name or "Kallee Nepal"
+                existing.shop_latitude = existing.shop_latitude or 27.7172
+                existing.shop_longitude = existing.shop_longitude or 85.3240
+                existing.shop_district = existing.shop_district or "Kathmandu"
+                existing.shop_zone = existing.shop_zone or "Bagmati"
+                db.commit()
         except Exception as e:
             logger.exception("Failed to seed admin user: %s", e)
     finally:
@@ -195,6 +242,19 @@ async def serve_upload(file_path: str):
 
 # Register all API routes
 init_routes(app)
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception:
+        manager.disconnect(websocket)
+
 
 # Optional startup utilities
 # seed_product()

@@ -12,6 +12,10 @@ from app.schema.user_schema import (
     UserPublic,
     UpdateUserSchema,
     DeleteUserResponseModel,
+    RegisterResponse,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
+    ChangePasswordRequest,
 )
 from app.dependencies import (
     get_user_service_dep,
@@ -30,32 +34,65 @@ address_dependency = Annotated[
 
 @router.post(
     "/register",
-    response_model=UserPublic,
+    response_model=RegisterResponse,
     summary="Register user",
-    description="Create a new user account.",
+    description="Create a new user account. Sends a verification email.",
 )
 async def create_user(
     create_user_data: CreateUserSchema,
     user_service: user_dependency,
+) -> RegisterResponse:
+    return user_service.create_user(create_user_data)
+
+
+@router.post(
+    "/forgot-password",
+    summary="Forgot password",
+    description="Send a password reset link to the user's email.",
+)
+async def forgot_password(
+    req: ForgotPasswordRequest,
+    user_service: user_dependency,
+) -> dict:
+    return user_service.forgot_password(req)
+
+
+@router.post(
+    "/reset-password",
+    summary="Reset password",
+    description="Reset password using a reset token.",
+)
+async def reset_password(
+    req: ResetPasswordRequest,
+    user_service: user_dependency,
+) -> dict:
+    return user_service.reset_password(req)
+
+
+@router.post(
+    "/change-password",
+    summary="Change password",
+    description="Change the current user's password.",
+)
+async def change_password(
+    req: ChangePasswordRequest,
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+    user_service: user_dependency,
+) -> dict:
+    return user_service.change_password(current_user.id, req)
+
+
+@router.get(
+    "/verify/{token}",
+    response_model=UserPublic,
+    summary="Verify email",
+    description="Verify a user's email using the token from the verification email.",
+)
+async def verify_email(
+    token: str,
+    user_service: user_dependency,
 ) -> UserPublic:
-    """
-    Register a new user and return the public profile.
-
-    This endpoint allows a new user to register by providing the necessary user data.
-    The user service handles the creation logic, including validation and persistence.
-
-    Parameters:
-    - create_user_data (CreateUserSchema): The data required to create a new user, such as username, email, and password.
-    - user_service (UserService): Dependency-injected service for user operations.
-
-    Returns:
-    - UserPublic: The public profile of the newly created user.
-
-    Raises:
-    - HTTPException: If validation fails or a conflict occurs (e.g., duplicate email).
-    """
-    user = user_service.create_user(create_user_data)
-    return user
+    return user_service.verify_user(token)
 
 
 @router.post(
@@ -207,6 +244,19 @@ async def logout(request: Request, response: Response):
     response.delete_cookie("session_id")
     response.delete_cookie("refresh_token")
     return {"detail": "Logged out"}
+
+
+@router.get(
+    "/me/addresses",
+    response_model=list[AddressPublic],
+    summary="List addresses",
+    description="Get all addresses for the current user.",
+)
+async def list_addresses(
+    current_user: Annotated[UserPublic, Depends(get_current_user)],
+    address_service: address_dependency,
+) -> list[AddressPublic]:
+    return address_service.list_addresses(current_user.id)
 
 
 @router.post(

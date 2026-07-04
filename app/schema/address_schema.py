@@ -2,14 +2,24 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 
+LABELS = ["home", "office", "other"]
+
+
 # ---- Base ----
 class AddressBase(BaseModel):
     type: str = Field(max_length=20)
-    street: Optional[str] = None
-    city: Optional[str] = Field(default=None, max_length=100)
+    label: Optional[str] = Field(default=None, max_length=20)
+    phone: Optional[str] = Field(default=None, max_length=20)
+    street: str
+    city: str = Field(max_length=100)
+    district: Optional[str] = Field(default=None, max_length=100)
+    zone: Optional[str] = Field(default=None, max_length=100)
     state: Optional[str] = Field(default=None, max_length=100)
     postal_code: Optional[str] = Field(default=None, max_length=20)
     country: Optional[str] = Field(default=None, max_length=100)
+    landmark: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     is_default: Optional[bool] = False
 
 
@@ -21,11 +31,18 @@ class AddressCreate(AddressBase):
 # ---- Update ----
 class AddressUpdate(BaseModel):
     type: Optional[str] = Field(default=None, max_length=20)
+    label: Optional[str] = Field(default=None, max_length=20)
+    phone: Optional[str] = Field(default=None, max_length=20)
     street: Optional[str] = Field(default=None, max_length=100)
     city: Optional[str] = Field(default=None, max_length=100)
+    district: Optional[str] = Field(default=None, max_length=100)
+    zone: Optional[str] = Field(default=None, max_length=100)
     state: Optional[str] = Field(default=None, max_length=100)
     postal_code: Optional[str] = Field(default=None, max_length=20)
     country: Optional[str] = Field(default=None, max_length=100)
+    landmark: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     is_default: Optional[bool] = None
 
     model_config = {"from_attributes": True}

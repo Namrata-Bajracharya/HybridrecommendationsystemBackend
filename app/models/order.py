@@ -16,16 +16,18 @@ class Order(Base):
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     shipping_address_id: Mapped[int] = mapped_column(
-        ForeignKey("addresses.id", ondelete="RESTRICT"), nullable=False
+        ForeignKey("addresses.id", ondelete="RESTRICT"), nullable=True
     )
     billing_address_id: Mapped[int] = mapped_column(
-        ForeignKey("addresses.id", ondelete="RESTRICT"), nullable=False
+        ForeignKey("addresses.id", ondelete="RESTRICT"), nullable=True
     )
     order_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     total_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     status: Mapped[str] = mapped_column(
         SQLEnum(
-            "pending", "paid", "shipped", "delivered", "cancelled", name="order_status"
+            "pending", "order_received", "packed", "sent_for_delivery",
+            "delivered", "paid", "cancelled", "refund_requested", "refunded",
+            name="order_status"
         ),
         default="pending",
     )
@@ -38,6 +40,16 @@ class Order(Base):
         SQLEnum("pending", "success", "failed", name="payment_status"),
         default="pending",
     )
+    contact_name: Mapped[str] = mapped_column(String(200), nullable=True)
+    contact_phone: Mapped[str] = mapped_column(String(50), nullable=True)
+    contact_email: Mapped[str] = mapped_column(String(255), nullable=True)
+    payment_mode: Mapped[str] = mapped_column(String(50), default="cod")
+    shipping_cost: Mapped[float] = mapped_column(Numeric(10, 2), default=0)
+    tax: Mapped[float] = mapped_column(Numeric(10, 2), default=0)
+    discount: Mapped[float] = mapped_column(Numeric(10, 2), default=0)
+    cancel_reason: Mapped[str] = mapped_column(String(500), nullable=True)
+    cancelled_by: Mapped[str] = mapped_column(String(50), nullable=True)
+    refund_reason: Mapped[str] = mapped_column(String(500), nullable=True)
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="orders")

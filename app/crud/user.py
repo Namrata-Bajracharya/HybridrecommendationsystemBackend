@@ -14,15 +14,13 @@ class UserCrud:
     def __init__(self, db: Session):
         self.db = db
 
-    def create_user(self, user_create_data: CreateUserSchema) -> User:
-        """
-        Create a new user
-        """
+    def create_user(self, user_create_data: CreateUserSchema, verification_token: str | None = None) -> User:
         try:
             hashed_password = hash_password(user_create_data.password)
             db_user = User(
                 **user_create_data.model_dump(exclude={"password"}),
                 password_hash=hashed_password,
+                verification_token=verification_token,
             )
             self.db.add(db_user)
             self.db.commit()
@@ -34,6 +32,12 @@ class UserCrud:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to create user",
             )
+
+    def get_user_by_verification_token(self, token: str) -> User | None:
+        return self.db.query(User).filter(User.verification_token == token).first()
+
+    def get_user_by_password_reset_token(self, token: str) -> User | None:
+        return self.db.query(User).filter(User.password_reset_token == token).first()
 
     def get_user(self, user_id: int) -> Optional[User]:
         """

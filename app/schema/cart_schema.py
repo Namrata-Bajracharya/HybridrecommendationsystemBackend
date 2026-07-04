@@ -1,10 +1,11 @@
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 
 
 class CartItemCreate(BaseModel):
     product_id: int
     quantity: int = Field(default=1, ge=1)
+    variant_id: Optional[int] = None
 
 
 class CartItemUpdate(BaseModel):
@@ -14,6 +15,7 @@ class CartItemUpdate(BaseModel):
 class CartItemResponse(BaseModel):
     id: int
     product_id: int
+    variant_id: Optional[int] = None
     quantity: int
     product_name: str  # ✅ FIXED: should be string
     unit_price: float

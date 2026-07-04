@@ -15,11 +15,18 @@ class Address(Base):
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     type: Mapped[str] = mapped_column(String(20), nullable=False)
+    label: Mapped[Optional[str]] = mapped_column(String(20))
+    phone: Mapped[Optional[str]] = mapped_column(String(20))
     street: Mapped[Optional[str]] = mapped_column(Text)
     city: Mapped[Optional[str]] = mapped_column(String(100))
+    district: Mapped[Optional[str]] = mapped_column(String(100))
+    zone: Mapped[Optional[str]] = mapped_column(String(100))
     state: Mapped[Optional[str]] = mapped_column(String(100))
     postal_code: Mapped[Optional[str]] = mapped_column(String(20))
     country: Mapped[Optional[str]] = mapped_column(String(100))
+    landmark: Mapped[Optional[str]] = mapped_column(Text)
+    latitude: Mapped[Optional[float]] = mapped_column()
+    longitude: Mapped[Optional[float]] = mapped_column()
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=func.current_timestamp()

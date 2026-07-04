@@ -9,6 +9,9 @@ class AddressCrud:
     def __init__(self, db: Session):
         self.db = db
 
+    def get_addresses_by_user(self, user_id: int) -> list[Address]:
+        return self.db.query(Address).filter(Address.user_id == user_id).all()
+
     def create_address(
         self, id: int, is_first: bool, address_data: AddressCreate
     ) -> Address:
@@ -18,6 +21,8 @@ class AddressCrud:
         data = address_data.model_dump()
         if is_first:
             data["is_default"] = True
+        if not data.get("label"):
+            data["label"] = "home" if is_first else "other"
 
         db_address = Address(**data, user_id=id)
         self.db.add(db_address)

@@ -5,6 +5,7 @@ from sqlalchemy import (
     String,
     DateTime,
     Integer,
+    Boolean,
     func,
     Enum as SQLEnum,
 )
@@ -25,6 +26,14 @@ class User(Base):
     role: Mapped[str] = mapped_column(
         SQLEnum("customer", "admin", name="user_roles"), default="customer"
     )
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    verification_token: Mapped[Optional[str]] = mapped_column(String(255))
+    password_reset_token: Mapped[Optional[str]] = mapped_column(String(255))
+    shop_name: Mapped[Optional[str]] = mapped_column(String(200))
+    shop_latitude: Mapped[Optional[float]] = mapped_column()
+    shop_longitude: Mapped[Optional[float]] = mapped_column()
+    shop_district: Mapped[Optional[str]] = mapped_column(String(100))
+    shop_zone: Mapped[Optional[str]] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=func.current_timestamp()
     )

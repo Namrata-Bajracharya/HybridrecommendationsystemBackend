@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from app.models.order import Order
 from app.models.order_item import OrderItem
 from app.models.product import Product
+from app.models.product_variant import ProductVariant
 from app.models.cart_item import CartItem
 from app.models.address import Address
 from app.core.exceptions import OrderException
@@ -22,6 +23,8 @@ class OrderCrud:
         self.address_crud = AddressCrud(db=db)
 
     def validate_address(self, user_id: int, address_id: int):
+        if address_id is None:
+            return None
         address = self.address_crud.get_single_address(address_id)
         if not address or address.user_id != user_id:
             raise OrderException("Invalid address")
@@ -38,12 +41,27 @@ class OrderCrud:
             raise OrderException("Your cart is empty.")
         return items
 
+    def _resolve_cart_item_price(self, item: CartItem) -> float:
+        if item.variant_id:
+            variant = self.db.get(ProductVariant, item.variant_id)
+            if variant and variant.price is not None:
+                return variant.price
+        return float(item.product.price)
+
+    def _resolve_cart_item_stock(self, item: CartItem) -> int:
+        if item.variant_id:
+            variant = self.db.get(ProductVariant, item.variant_id)
+            if variant:
+                return variant.stock_quantity
+        return item.product.stock_quantity
+
     def validate_stock(self, items: list[CartItem]):
         for item in items:
-            if item.product.stock_quantity < item.quantity:
+            stock = self._resolve_cart_item_stock(item)
+            if stock < item.quantity:
                 raise OrderException(
                     f"Not enough stock for {item.product.name}. "
-                    f"Available: {item.product.stock_quantity}"
+                    f"Available: {stock}"
                 )
 
     def create_order(self, user_id: int, shipping_id: int, billing_id: int):
@@ -56,7 +74,7 @@ class OrderCrud:
         self.validate_stock(items)
 
         # Compute total
-        total_amount = sum(i.product.price * i.quantity for i in items)
+        total_amount = sum(self._resolve_cart_item_price(i) * i.quantity for i in items)
 
         order = Order(
             user_id=user_id,
@@ -72,16 +90,23 @@ class OrderCrud:
 
         # Create order items + reduce stock
         for item in items:
+            unit_price = self._resolve_cart_item_price(item)
             order_item = OrderItem(
                 order_id=order.id,
                 product_id=item.product_id,
-                unit_price=item.product.price,
+                variant_id=item.variant_id,
+                unit_price=unit_price,
                 quantity=item.quantity,
             )
             self.db.add(order_item)
 
             # Reduce stock
-            item.product.stock_quantity -= item.quantity
+            if item.variant_id:
+                variant = self.db.get(ProductVariant, item.variant_id)
+                if variant:
+                    variant.stock_quantity -= item.quantity
+            else:
+                item.product.stock_quantity -= item.quantity
 
         # Clear cart
         for item in items:

@@ -1,4 +1,5 @@
 import hashlib
+import secrets
 from datetime import timedelta, datetime, timezone
 
 from app.schema.user_schema import (
@@ -9,13 +10,26 @@ from app.schema.user_schema import (
     RefreshTokenRequest,
     RefreshTokenResponse,
     UpdateUserSchema,
+    VerificationStatus,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
+    ChangePasswordRequest,
 )
 from app.models.user import User
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from app.crud.user import UserCrud
 from app.crud.session import SessionCrud
-from app.utils.security import verify_password, create_token, generate_refresh_token
+from app.utils.security import (
+    verify_password,
+    create_token,
+    generate_refresh_token,
+    hash_password,
+)
+from app.services.email_service import (
+    send_verification_email,
+    send_password_reset_email,
+)
 
 
 class UserService:
@@ -32,28 +46,43 @@ class UserService:
         self.db = db
         self.crud = UserCrud(db=db)
 
-    def create_user(self, user_create_data: CreateUserSchema) -> UserPublic:
-        """
-        Create a new user based on the provided data.
-
-        This method checks for existing users with the same email, raises an exception if found,
-        and then creates the user using the CRUD layer.
-
-        Parameters:
-        - user_create_data (CreateUserSchema): The schema containing user creation data like email and password.
-
-        Returns:
-        - UserPublic: The public representation of the newly created user.
-
-        Raises:
-        - HTTPException: 400 Bad Request if a user with the same email already exists.
-        """
+    def create_user(self, user_create_data: CreateUserSchema) -> dict:
         if self.crud.get_user_by_email(user_create_data.email):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="User with this email already exists",
             )
-        user = self.crud.create_user(user_create_data=user_create_data)
+        token = secrets.token_urlsafe(48)
+        user = self.crud.create_user(
+            user_create_data=user_create_data,
+            verification_token=token,
+        )
+        try:
+            send_verification_email(user_create_data.email, token)
+        except RuntimeError as e:
+            self.db.delete(user)
+            self.db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(e),
+            )
+        return {"message": "Registration successful. Please check your email to verify your account."}
+
+    def verify_user(self, token: str) -> UserPublic:
+        user = self.crud.get_user_by_verification_token(token)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or expired verification token",
+            )
+        if user.is_verified:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email already verified",
+            )
+        user.is_verified = True
+        self.db.commit()
+        self.db.refresh(user)
         return UserPublic.model_validate(user)
 
     def authenticate_user(self, user_login_data: LoginSchema) -> User:
@@ -97,6 +126,11 @@ class UserService:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect email or password",
+            )
+        if not user.is_verified:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Please verify your email before signing in. Check your inbox for the verification link.",
             )
         access_token_payload = {"sub": str(user.id)}
         access_token = create_token(data=access_token_payload)
@@ -205,6 +239,52 @@ class UserService:
         return UserPublic.model_validate(
             user
         )  # Note: Added model_validate for consistency with return type
+
+    def forgot_password(self, req: ForgotPasswordRequest) -> dict:
+        user = self.crud.get_user_by_email(req.email)
+        if not user:
+            return {"message": "If that email is registered, a password reset link has been sent."}
+        token = secrets.token_urlsafe(48)
+        user.password_reset_token = token
+        self.db.commit()
+        try:
+            send_password_reset_email(req.email, token)
+        except RuntimeError as e:
+            user.password_reset_token = None
+            self.db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(e),
+            )
+        return {"message": "If that email is registered, a password reset link has been sent."}
+
+    def reset_password(self, req: ResetPasswordRequest) -> dict:
+        user = self.crud.get_user_by_password_reset_token(req.token)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or expired reset token",
+            )
+        user.password_hash = hash_password(req.password)
+        user.password_reset_token = None
+        self.db.commit()
+        return {"message": "Password reset successful. You can now sign in."}
+
+    def change_password(self, user_id: int, req: ChangePasswordRequest) -> dict:
+        user = self.crud.get_user(user_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+            )
+        if not verify_password(req.current_password, user.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Current password is incorrect",
+            )
+        user.password_hash = hash_password(req.new_password)
+        self.db.commit()
+        return {"message": "Password changed successfully."}
 
     def delete_user(self, id: int):
         """

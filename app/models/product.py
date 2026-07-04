@@ -44,6 +44,10 @@ class Product(Base):
         "ProductImage", back_populates="product", cascade="all, delete-orphan",
         order_by="ProductImage.sort_order"
     )
+    variants: Mapped[List["ProductVariant"]] = relationship(
+        "ProductVariant", back_populates="product", cascade="all, delete-orphan",
+        order_by="ProductVariant.sort_order"
+    )
     cart_items: Mapped[List["CartItem"]] = relationship("CartItem", back_populates="product", cascade="all, delete-orphan")
     order_items: Mapped[List["OrderItem"]] = relationship("OrderItem", back_populates="product", cascade="all, delete-orphan")
     reviews: Mapped[List["Review"]] = relationship("Review", back_populates="product", cascade="all, delete-orphan")
