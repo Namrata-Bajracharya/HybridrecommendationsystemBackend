@@ -110,7 +110,30 @@ class OrderService:
         if subtotal >= self.FREE_SHIPPING_MIN:
             shipping_cost = 0.0
 
-        return self.crud.create_order(user_id, shipping_id, billing_id, shipping_cost)
+        order = self.crud.create_order(user_id, shipping_id, billing_id, shipping_cost)
+
+        user = self.db.get(User, user_id)
+        contact_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or f"User #{user_id}"
+
+        self._notify("New Order", f"Order #{order.order_number} placed by {contact_name} — Rs {order.total_amount:,.0f}", type="new_order", order_id=order.id)
+        self._notify_admins({"type": "new_order", "order_id": order.id, "order_number": order.order_number, "customer_name": contact_name, "total": float(order.total_amount), "status": "pending"})
+
+        for admin_email in self._get_admin_emails():
+            try:
+                email_service.send_order_status_email(
+                    to_email=admin_email,
+                    subject=f"New Order #{order.order_number}",
+                    heading="New Order Received",
+                    body_lines=[
+                        f"Customer: {contact_name} ({user.email})",
+                        f"Total: Rs {order.total_amount:,.0f}",
+                        f"Order #{order.order_number} is pending your review.",
+                    ],
+                )
+            except Exception:
+                pass
+
+        return order
 
     def place_direct_order(
         self,
