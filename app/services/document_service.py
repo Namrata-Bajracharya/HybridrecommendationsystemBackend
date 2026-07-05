@@ -78,14 +78,14 @@ class DocumentService:
 
         ext = Path(filename).suffix
         stored_name = f"{now.strftime('%Y%m%d_%H%M%S')}_{uuid4().hex}{ext}"
-        rel_path = Path("upload") / year / month / stored_name
+        rel_path = Path(year) / month / stored_name
         abs_path = (dest_dir / stored_name).resolve()
 
         content, mime_type, ext = self._compress_image(content, mime_type)
 
         if ext:
             stored_name = f"{now.strftime('%Y%m%d_%H%M%S')}_{uuid4().hex}{ext}"
-            rel_path = Path("upload") / year / month / stored_name
+            rel_path = Path(year) / month / stored_name
             abs_path = (dest_dir / stored_name).resolve()
 
         with open(abs_path, "wb") as f:

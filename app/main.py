@@ -25,58 +25,54 @@ from fastapi import WebSocket, WebSocketDisconnect, Query
 from app.socketio_server import sio
 
 # DB/user seeding
-from app.db.database import SessionLocal
+from app.db.database import SessionLocal, Base
 from app.crud.user import UserCrud
 from app.schema.user_schema import CreateUserSchema
 
 
-def column_exists(db, table, col):
-    try:
-        result = db.execute(text(f"PRAGMA table_info('{table}')")).fetchall()
-        return any(row[1] == col for row in result)
-    except Exception:
-        return False
+_SQLITE_TYPE_MAP = dict((k.upper(), v) for k, v in {
+    "integer": "INTEGER",
+    "varchar": "VARCHAR",
+    "char": "VARCHAR",
+    "text": "TEXT",
+    "float": "FLOAT",
+    "numeric": "NUMERIC",
+    "boolean": "BOOLEAN",
+    "datetime": "DATETIME",
+    "date": "DATE",
+    "json": "TEXT",
+    "enum": "VARCHAR",
+    "largebinary": "BLOB",
+}.items())
+
+
+def _col_sqlite_type(col):
+    coltype = str(col.type).upper()
+    base = coltype.split("(")[0]
+    return _SQLITE_TYPE_MAP.get(base, "TEXT")
 
 
 def add_missing_columns(db):
-    """Add columns that may not exist on existing SQLite tables."""
-    migs = [
-        ("addresses", "district", "VARCHAR(100)"),
-        ("addresses", "zone", "VARCHAR(100)"),
-        ("users", "shop_name", "VARCHAR(200)"),
-        ("users", "shop_latitude", "FLOAT"),
-        ("users", "shop_longitude", "FLOAT"),
-        ("users", "shop_district", "VARCHAR(100)"),
-        ("users", "shop_zone", "VARCHAR(100)"),
-        ("orders", "contact_name", "VARCHAR(200)"),
-        ("orders", "contact_phone", "VARCHAR(50)"),
-        ("orders", "contact_email", "VARCHAR(255)"),
-        ("orders", "payment_mode", "VARCHAR(50)"),
-        ("orders", "shipping_cost", "NUMERIC(10,2)"),
-        ("orders", "tax", "NUMERIC(10,2)"),
-        ("orders", "discount", "NUMERIC(10,2)"),
-        ("orders", "cancel_reason", "VARCHAR(500)"),
-        ("orders", "cancelled_by", "VARCHAR(50)"),
-        ("orders", "refund_reason", "VARCHAR(500)"),
-        ("orders", "rejected_at", "DATETIME"),
-        ("reviews", "reply", "TEXT"),
-        ("reviews", "replied_at", "DATETIME"),
-        ("products", "buying_price", "NUMERIC(10,2)"),
-        ("products", "selling_price", "NUMERIC(10,2)"),
-        ("products", "brand_id", "INTEGER"),
-        ("product_variants", "buying_price", "FLOAT"),
-        ("product_variants", "selling_price", "FLOAT"),
-        ("orderitems", "unit_cost", "NUMERIC(10,2)"),
-    ]
-    for table, col, coltype in migs:
-        if column_exists(db, table, col):
+    """Dynamically add any model columns missing from existing SQLite tables."""
+    import app.models
+    db_tables = {row[0] for row in db.execute(text("SELECT name FROM sqlite_master WHERE type='table'")).fetchall()}
+    for table_name, table in Base.metadata.tables.items():
+        if table_name not in db_tables:
             continue
         try:
-            db.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}"))
-            db.commit()
-            logger.info("Added column %s.%s", table, col)
+            existing = {row[1] for row in db.execute(text(f"PRAGMA table_info('{table_name}')")).fetchall()}
         except Exception:
-            db.rollback()
+            continue
+        for col in table.columns:
+            if col.name in existing:
+                continue
+            try:
+                sql_type = _col_sqlite_type(col)
+                db.execute(text(f"ALTER TABLE \"{table_name}\" ADD COLUMN \"{col.name}\" {sql_type}"))
+                db.commit()
+                logger.info("Added column %s.%s (%s)", table_name, col.name, sql_type)
+            except Exception:
+                db.rollback()
 
 
 @asynccontextmanager
