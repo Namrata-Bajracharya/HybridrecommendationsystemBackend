@@ -15,6 +15,7 @@ Usage:
 import base64
 import io
 import random
+from itertools import cycle
 from PIL import Image
 from app.db.database import SessionLocal
 from app.crud.product import ProductCrud
@@ -37,16 +38,11 @@ ADJECTIVES = [
     "Compact", "Professional", "Standard", "Portable", "Smart",
 ]
 
-# One placeholder image slot per root category (used for all products in that category)
 SEED_SLOTS = {
-    "clothes":     [{"name": "clothes_1", "rgb": (200, 160, 160)},
-                    {"name": "clothes_2", "rgb": (160, 180, 200)}],
-    "electronics": [{"name": "electronics_1", "rgb": (180, 190, 210)},
-                    {"name": "electronics_2", "rgb": (160, 200, 180)}],
-    "sports":      [{"name": "sports_1", "rgb": (200, 190, 150)},
-                    {"name": "sports_2", "rgb": (180, 200, 180)}],
-    "books":       [{"name": "books_1", "rgb": (180, 160, 140)},
-                    {"name": "books_2", "rgb": (190, 180, 200)}],
+    "clothes":     (200, 160, 160),
+    "electronics": (180, 190, 210),
+    "sports":      (200, 190, 150),
+    "books":       (180, 160, 140),
 }
 
 
@@ -59,18 +55,15 @@ def _make_data_url(rgb: tuple[int, int, int]) -> str:
     return f"data:image/jpeg;base64,{b64}"
 
 
-def _ensure_seed_images() -> dict[str, list[str]]:
-    """Generate base64 data URLs for each root slot.
-
-    Returns {root_slug: [data_url, ...]}.
-    """
-    slot_urls: dict[str, list[str]] = {}
-    for root_slug, slots in SEED_SLOTS.items():
-        urls = []
-        for slot in slots:
-            urls.append(_make_data_url(slot["rgb"]))
-        slot_urls[root_slug] = urls
-    return slot_urls
+def _load_real_document_ids(db) -> list[str]:
+    """Return IDs of real product images already in the DB (PNG files)."""
+    from app.models.document import Document
+    rows = (
+        db.query(Document.id)
+        .filter(Document.relative_path.like('%.png'))
+        .all()
+    )
+    return [r[0] for r in rows]
 
 
 def _price_for(root_slug: str) -> float:
@@ -144,12 +137,24 @@ def seed():
                         "children": 2, "comics": 2},
     }
 
-    # Pre-create seed image data URLs
-    slot_urls = _ensure_seed_images()
-
     # Map slug → root
     roots = cat_crud.get_root_categories()
     slug_to_root = {r.slug: r for r in roots}
+
+    # Load real document IDs from DB (PNG = real images uploaded by user)
+    real_doc_ids = _load_real_document_ids(db)
+    if real_doc_ids:
+        print(f"  Using {len(real_doc_ids)} real images from DB")
+        doc_cycle = cycle(real_doc_ids)
+
+        def _img_for_product() -> dict:
+            return {"image_document_ids": [next(doc_cycle)], "image_data_urls": None}
+    else:
+        print("  No real images found — generating solid-color placeholders")
+
+        def _img_for_product(r_slug: str) -> dict:
+            url = _make_data_url(SEED_SLOTS.get(r_slug, (200, 200, 200)))
+            return {"image_data_urls": [url], "image_document_ids": None}
 
     created = 0
     skipped = 0
@@ -159,7 +164,6 @@ def seed():
         if not root:
             print(f"  Root '{root_slug}' not found — skipping")
             continue
-        root_images = slot_urls.get(root_slug, [])
 
         for sub_name, count in subs.items():
             child = next((c for c in (root.children or []) if c.name == sub_name), None)
@@ -177,6 +181,7 @@ def seed():
                 p = _price_for(root_slug)
                 bp = round(p * random.uniform(0.4, 0.8), 2)
 
+                kwargs = _img_for_product(root_slug) if not real_doc_ids else _img_for_product()
                 dto = ProductCreate(
                     name=name,
                     description=desc,
@@ -187,11 +192,7 @@ def seed():
                     field_values=fvals,
                     category_id=child.id,
                     is_active=True,
-                    image_data_urls=(
-                        [random.choice(root_images)]
-                        if root_images
-                        else None
-                    ),
+                    **kwargs,
                 )
                 try:
                     prod_crud.create_product(dto)
