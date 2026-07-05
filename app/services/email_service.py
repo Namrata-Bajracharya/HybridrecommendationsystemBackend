@@ -62,3 +62,17 @@ def send_password_reset_email(to_email: str, token: str) -> None:
 </html>"""
 
     _send_email(to_email, subject, html)
+
+
+def send_order_status_email(to_email: str, subject: str, heading: str, body_lines: list[str]) -> None:
+    lines_html = "".join(f"<p>{line}</p>" for line in body_lines)
+    html = f"""\
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; padding: 20px;">
+  <h2>{heading}</h2>
+  {lines_html}
+  <p style="color: #999; font-size: 12px;">Kallee Nepal</p>
+</body>
+</html>"""
+    _send_email(to_email, subject, html)

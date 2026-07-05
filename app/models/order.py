@@ -25,8 +25,11 @@ class Order(Base):
     total_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     status: Mapped[str] = mapped_column(
         SQLEnum(
-            "pending", "order_received", "packed", "sent_for_delivery",
-            "delivered", "paid", "cancelled", "refund_requested", "refunded",
+            "pending", "accepted", "rejected", "packed", "on_delivery",
+            "delivered", "cancelled", "refund_requested",
+            "refund_out_for_pickup", "item_retrieved_from_customer",
+            "item_retrieved_by_admin", "refund_on_the_way",
+            "refund_successful", "refunded",
             name="order_status"
         ),
         default="pending",
@@ -47,9 +50,14 @@ class Order(Base):
     shipping_cost: Mapped[float] = mapped_column(Numeric(10, 2), default=0)
     tax: Mapped[float] = mapped_column(Numeric(10, 2), default=0)
     discount: Mapped[float] = mapped_column(Numeric(10, 2), default=0)
+    delivered_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     cancel_reason: Mapped[str] = mapped_column(String(500), nullable=True)
     cancelled_by: Mapped[str] = mapped_column(String(50), nullable=True)
+    reject_reason: Mapped[str] = mapped_column(String(500), nullable=True)
     refund_reason: Mapped[str] = mapped_column(String(500), nullable=True)
+    refund_description: Mapped[str] = mapped_column(String(1000), nullable=True)
+    refund_proof_images: Mapped[str] = mapped_column(String(2000), nullable=True)
+    refund_payment_proof: Mapped[str] = mapped_column(String(500), nullable=True)
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="orders")

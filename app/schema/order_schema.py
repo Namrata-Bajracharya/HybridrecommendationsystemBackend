@@ -63,7 +63,12 @@ class OrderListResponse(BaseModel):
     payment_mode: str = "cod"
     cancel_reason: Optional[str] = None
     cancelled_by: Optional[str] = None
+    reject_reason: Optional[str] = None
     refund_reason: Optional[str] = None
+    refund_description: Optional[str] = None
+    refund_proof_images: Optional[str] = None
+    refund_payment_proof: Optional[str] = None
+    delivered_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
@@ -73,5 +78,15 @@ class CancelOrderRequest(BaseModel):
     cancelled_by: str = "admin"
 
 
+class RejectOrderRequest(BaseModel):
+    reason: str
+
+
 class RefundRequest(BaseModel):
     reason: str
+    description: Optional[str] = None
+    proof_images: Optional[list[str]] = None
+
+
+class RefundActionRequest(BaseModel):
+    proof_image: Optional[str] = None

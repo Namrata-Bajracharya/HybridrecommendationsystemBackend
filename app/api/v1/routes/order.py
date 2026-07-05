@@ -4,7 +4,8 @@ from app.services.order_service import OrderService
 from app.dependencies import get_current_user, get_order_service_dep, get_optional_user
 from app.schema.order_schema import (
     OrderCreateRequest, OrderResponse, DirectOrderRequest,
-    OrderListResponse, CancelOrderRequest, RefundRequest,
+    OrderListResponse, CancelOrderRequest, RefundRequest, RejectOrderRequest,
+    RefundActionRequest,
 )
 from typing import Annotated
 from app.dependencies import get_db
@@ -74,6 +75,16 @@ def accept_order(
     return order_service.accept_order(order_id)
 
 
+@router.patch("/{order_id}/reject", response_model=OrderListResponse)
+def reject_order(
+    order_id: int,
+    payload: RejectOrderRequest,
+    current_user: user_dependency,
+    order_service: order_dependency,
+):
+    return order_service.reject_order(order_id, reason=payload.reason)
+
+
 @router.patch("/{order_id}/cancel", response_model=OrderListResponse)
 def cancel_order(
     order_id: int,
@@ -102,7 +113,54 @@ def request_refund(
     current_user: user_dependency,
     order_service: order_dependency,
 ):
-    return order_service.request_refund(order_id, payload.reason)
+    return order_service.request_refund(order_id, reason=payload.reason, description=payload.description, proof_images=payload.proof_images)
+
+
+@router.patch("/{order_id}/refund/accept", response_model=OrderListResponse)
+def accept_refund(
+    order_id: int,
+    current_user: user_dependency,
+    order_service: order_dependency,
+):
+    return order_service.accept_refund(order_id)
+
+
+@router.patch("/{order_id}/refund/item-retrieved-from-customer", response_model=OrderListResponse)
+def item_retrieved_from_customer(
+    order_id: int,
+    current_user: user_dependency,
+    order_service: order_dependency,
+):
+    return order_service.mark_item_retrieved_from_customer(order_id)
+
+
+@router.patch("/{order_id}/refund/item-retrieved-by-admin", response_model=OrderListResponse)
+def item_retrieved_by_admin(
+    order_id: int,
+    current_user: user_dependency,
+    order_service: order_dependency,
+):
+    return order_service.mark_item_retrieved_by_admin(order_id)
+
+
+@router.patch("/{order_id}/refund/initiate-payment", response_model=OrderListResponse)
+def initiate_refund_payment(
+    order_id: int,
+    payload: RefundActionRequest,
+    current_user: user_dependency,
+    order_service: order_dependency,
+):
+    return order_service.initiate_refund_payment(order_id, proof_image=payload.proof_image)
+
+
+@router.patch("/{order_id}/refund/complete", response_model=OrderListResponse)
+def complete_refund(
+    order_id: int,
+    payload: RefundActionRequest,
+    current_user: user_dependency,
+    order_service: order_dependency,
+):
+    return order_service.complete_refund(order_id, proof_image=payload.proof_image)
 
 
 @router.patch("/{order_id}/customer-cancel", response_model=OrderListResponse)

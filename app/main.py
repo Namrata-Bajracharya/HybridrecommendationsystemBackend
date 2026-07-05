@@ -1,3 +1,5 @@
+import json
+import socketio
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -16,7 +18,10 @@ from app.api.v1.init_routes import init_routes
 from app.core.logger import logger
 from app.middleware.request_logger import LoggingMiddleware
 from app.websocket_manager import manager
-from fastapi import WebSocket, WebSocketDisconnect
+from app.utils.security import decode_access_token, TokenError
+from app.models.user import User
+from fastapi import WebSocket, WebSocketDisconnect, Query
+from app.socketio_server import sio
 
 # DB/user seeding
 from app.db.database import SessionLocal
@@ -245,16 +250,47 @@ init_routes(app)
 
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
+async def websocket_endpoint(
+    websocket: WebSocket,
+    token: str = Query(""),
+):
+    user_id = None
+    is_admin = False
+    if token:
+        try:
+            payload = decode_access_token(token)
+            sub = payload.get("sub")
+            if sub:
+                user_id = int(sub)
+                db = SessionLocal()
+                try:
+                    user = db.get(User, user_id)
+                    if user:
+                        is_admin = user.role == "admin"
+                finally:
+                    db.close()
+        except (TokenError, ValueError, Exception):
+            pass
+
+    await manager.connect(websocket, user_id=user_id, is_admin=is_admin)
     try:
         while True:
-            await websocket.receive_text()
+            data = await websocket.receive_text()
+            if data:
+                try:
+                    msg = json.loads(data)
+                    msg_type = msg.get("type", "")
+                    if msg_type == "ping":
+                        await manager.send_json(websocket, {"type": "pong"})
+                except json.JSONDecodeError:
+                    pass
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception:
         manager.disconnect(websocket)
 
+
+socket_app = socketio.ASGIApp(sio, other_asgi_app=app)
 
 # Optional startup utilities
 # seed_product()
