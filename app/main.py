@@ -30,6 +30,14 @@ from app.crud.user import UserCrud
 from app.schema.user_schema import CreateUserSchema
 
 
+def column_exists(db, table, col):
+    try:
+        result = db.execute(text(f"PRAGMA table_info('{table}')")).fetchall()
+        return any(row[1] == col for row in result)
+    except Exception:
+        return False
+
+
 def add_missing_columns(db):
     """Add columns that may not exist on existing SQLite tables."""
     migs = [
@@ -61,6 +69,8 @@ def add_missing_columns(db):
         ("orderitems", "unit_cost", "NUMERIC(10,2)"),
     ]
     for table, col, coltype in migs:
+        if column_exists(db, table, col):
+            continue
         try:
             db.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}"))
             db.commit()

@@ -1,6 +1,6 @@
 # command to RUN
-powershell -ExecutionPolicy Bypass -File .\run.ps1
 
+powershell -ExecutionPolicy Bypass -File .\run.ps1
 
 # FastAPI E-Commerce RESTFul API
 
@@ -39,8 +39,6 @@ A robust and scalable RESTful API built with FastAPI for managing an e-commerce 
 
 1.  **Clone the repository**
 
-  
-
 2.  **Create a virtual environment**
 
     ```bash
@@ -70,8 +68,13 @@ A robust and scalable RESTful API built with FastAPI for managing an e-commerce 
 
 Initialize the database and apply migrations:
 
+Scenario Command
+Fresh clone (no DB) alembic upgrade head
+Existing DB (was using old migrations) python alembic/fix_alembic.py then alembic upgrade head
+
 ```bash
 # Apply existing migrations
+
 alembic upgrade head
 ```
 
@@ -84,7 +87,6 @@ uvicorn app.main:app --reload
 ```
 
 The API will be available at `http://127.0.0.1:8000/api/v1`.
-
 
 ## API Documentation
 
