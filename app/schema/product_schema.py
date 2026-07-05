@@ -31,6 +31,8 @@ class ProductBase(BaseModel):
     name: str = Field(..., min_length=2, max_length=255)
     description: Optional[str] = None
     price: float = Field(..., gt=0)
+    buying_price: Optional[float] = Field(None, ge=0)
+    selling_price: Optional[float] = Field(None, ge=0)
     stock_quantity: Optional[int] = Field(0, ge=0)
     field_values: Optional[dict[str, Any]] = None
     category_id: Optional[int] = None
@@ -62,6 +64,8 @@ class ProductUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=255)
     description: Optional[str] = None
     price: Optional[float] = Field(None, gt=0)
+    buying_price: Optional[float] = Field(None, ge=0)
+    selling_price: Optional[float] = Field(None, ge=0)
     stock_quantity: Optional[int] = Field(None, ge=0)
     sku: Optional[str] = Field(None, max_length=100)
     field_values: Optional[dict[str, Any]] = None
@@ -75,7 +79,7 @@ class ProductResponse(ProductBase):
     id: int
     created_at: datetime
     slug: str
-    sku: str
+    sku: Optional[str]
     category: Optional[CategoryPublic] = None
     images: list[ProductImagePublic] = []
     average_rating: Optional[float] = Field(None, ge=0, le=5, description="Average rating from reviews (0-5)")

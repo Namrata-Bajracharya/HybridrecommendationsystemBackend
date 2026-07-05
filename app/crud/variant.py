@@ -6,6 +6,7 @@ from app.models.product_variant import ProductVariant
 from app.models.product import Product
 from app.models.document import Document
 from app.schema.variant_schema import VariantCreate, VariantUpdate
+from app.services.document_service import DocumentService
 
 
 class VariantCrud:
@@ -20,14 +21,21 @@ class VariantCrud:
 
     def create(self, product_id: int, dto: VariantCreate) -> ProductVariant:
         attrs = [a.model_dump() for a in dto.attributes] if dto.attributes else None
+        image_document_id = dto.image_document_id
+        if dto.image_data_url:
+            doc_service = DocumentService(self.db)
+            doc = doc_service.save_base64(dto.image_data_url)
+            image_document_id = doc.id
         variant = ProductVariant(
             product_id=product_id,
             name=dto.name,
             attributes=attrs,
             price=self._resolve_price(product_id, dto.price),
+            buying_price=dto.buying_price,
+            selling_price=dto.selling_price,
             stock_quantity=dto.stock_quantity,
             sku=dto.sku,
-            image_document_id=dto.image_document_id,
+            image_document_id=image_document_id,
             sort_order=dto.sort_order,
         )
         self.db.add(variant)

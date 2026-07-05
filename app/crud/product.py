@@ -79,13 +79,19 @@ class ProductCrud:
 
     def get_product_detail(self, slug: str) -> Product:
         """Retrieve a product by slug; returns None if not found."""
-        stmt = select(Product).where(Product.slug == slug).options(joinedload(Product.images), joinedload(Product.variants))
+        stmt = select(Product).where(Product.slug == slug).options(
+            joinedload(Product.images),
+            joinedload(Product.variants).joinedload(ProductVariant.image_document),
+        )
         product = self.db.scalar(stmt)
         return product
 
     def get_product_by_id(self, id: int) -> Product | None:
         """Retrieve a product by id; returns None if not found."""
-        stmt = select(Product).where(Product.id == id).options(joinedload(Product.images), joinedload(Product.variants))
+        stmt = select(Product).where(Product.id == id).options(
+            joinedload(Product.images),
+            joinedload(Product.variants).joinedload(ProductVariant.image_document),
+        )
         result = self.db.scalar(stmt)
         return result
 
@@ -160,7 +166,10 @@ class ProductCrud:
         count_stmt = select(func.count(Product.id)).where(*base_conditions)
         total_items = self.db.scalar(count_stmt)
 
-        stmt = select(Product).where(*base_conditions).options(joinedload(Product.images), joinedload(Product.variants)).order_by(order)
+        stmt = select(Product).where(*base_conditions).options(
+            joinedload(Product.images),
+            joinedload(Product.variants).joinedload(ProductVariant.image_document),
+        ).order_by(order)
 
         offset = (page - 1) * per_page
         items = self.db.scalars(stmt.offset(offset).limit(per_page)).unique().all()
@@ -226,7 +235,10 @@ class ProductCrud:
         stmt = (
             select(Product)
             .where(Product.category_id == category_id)
-            .options(joinedload(Product.images), joinedload(Product.variants))
+            .options(
+                joinedload(Product.images),
+                joinedload(Product.variants).joinedload(ProductVariant.image_document),
+            )
             .order_by(Product.id)
         )
         return self.db.scalars(stmt).unique().all()
@@ -236,7 +248,10 @@ class ProductCrud:
             select(Product)
             .join(Category, Product.category_id == Category.id)
             .where(Category.slug == slug)
-            .options(joinedload(Product.images), joinedload(Product.variants))
+            .options(
+                joinedload(Product.images),
+                joinedload(Product.variants).joinedload(ProductVariant.image_document),
+            )
             .order_by(Product.id)
         )
         return self.db.scalars(stmt).unique().all()
@@ -253,7 +268,7 @@ class ProductCrud:
                 return self.get_product_by_id(id)
 
             if "name" in update_data and "slug" not in update_data:
-                update_data["slug"] = generate_slug(self.db, update_data["name"])
+                update_data["slug"] = generate_slug(self.db, update_data["name"], context="product")
 
             if update_data:
                 stmt = (
@@ -268,12 +283,11 @@ class ProductCrud:
 
             if updated and has_image_changes:
                 from app.models.document import Document
-                old_docs = [
-                    pi.document_id
-                    for pi in self.db.execute(
+                old_docs = list(
+                    self.db.execute(
                         select(ProductImage.document_id).where(ProductImage.product_id == id)
-                    ).scalars()
-                ]
+                    ).scalars().all()
+                )
                 removed_ids = set(old_docs) - set(image_document_ids or [])
                 for did in removed_ids:
                     doc = self.db.get(Document, did)

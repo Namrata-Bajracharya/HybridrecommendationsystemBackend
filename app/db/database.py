@@ -12,8 +12,6 @@ class Base(DeclarativeBase):
     pass
 
 
-Base.metadata.create_all(engine)
-
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

@@ -16,9 +16,33 @@ from app.services.notification_service import NotificationService
 from app.services import email_service
 import json
 import asyncio
+import threading
 
 
 ADMIN_FLOW = ["accepted", "packed", "on_delivery", "delivered"]
+
+_main_loop = None
+_loop_lock = threading.Lock()
+
+
+def set_main_loop(loop):
+    global _main_loop
+    with _loop_lock:
+        _main_loop = loop
+
+
+def _get_main_loop():
+    global _main_loop
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        with _loop_lock:
+            if _main_loop is not None:
+                return _main_loop
+            try:
+                return asyncio.get_event_loop()
+            except RuntimeError:
+                return asyncio.new_event_loop()
 
 
 class OrderService:
@@ -30,33 +54,29 @@ class OrderService:
         admins = self.db.query(User).filter(User.role == "admin").all()
         return [a.email for a in admins if a.email]
 
-    def _notify(self, title: str, message: str, user_id: Optional[int] = None):
+    def _notify(self, title: str, message: str, user_id: Optional[int] = None, type: Optional[str] = None, order_id: Optional[int] = None):
         notif_service = NotificationService(self.db)
-        notif_service.create_notification(title=title, message=message, user_id=user_id)
+        notif_service.create_notification(title=title, message=message, user_id=user_id, type=type, order_id=order_id)
+
+    @staticmethod
+    def _run_async(coro):
+        loop = _get_main_loop()
+        if loop.is_running():
+            asyncio.run_coroutine_threadsafe(coro, loop)
+        else:
+            try:
+                asyncio.ensure_future(coro)
+            except RuntimeError:
+                pass
 
     def _broadcast(self, data: dict):
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(manager.broadcast(data))
-        except RuntimeError:
-            pass
+        self._run_async(manager.broadcast(data))
 
     def _notify_user(self, user_id: int, data: dict):
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(sio.emit("message", data, room=f"user:{user_id}"))
-        except RuntimeError:
-            pass
+        self._run_async(sio.emit("message", data, room=f"user:{user_id}"))
 
     def _notify_admins(self, data: dict):
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(sio.emit("message", data, room="admins"))
-        except RuntimeError:
-            pass
+        self._run_async(sio.emit("message", data, room="admins"))
 
     def _get_order_or_404(self, order_id: int) -> Order:
         order = self.db.get(Order, order_id)
@@ -106,6 +126,7 @@ class OrderService:
                 product_id=item["product_id"],
                 variant_id=item.get("variant_id"),
                 unit_price=item["price"],
+                unit_cost=None,
                 quantity=item["quantity"],
             )
             self.db.add(order_item)
@@ -113,10 +134,8 @@ class OrderService:
         self.db.commit()
         self.db.refresh(order)
 
-        self._notify("New Order", f"Order #{order.order_number} placed by {contact_name} — Rs {total_amount:,.0f}")
-        self._notify("Order Placed", f"Your order #{order.order_number} has been placed.", user_id=user_id)
+        self._notify("New Order", f"Order #{order.order_number} placed by {contact_name} — Rs {total_amount:,.0f}", type="new_order", order_id=order.id)
         self._notify_admins({"type": "new_order", "order_id": order.id, "order_number": order.order_number, "customer_name": contact_name, "total": total_amount, "status": "pending"})
-        self._notify_user(user_id, {"type": "order_placed", "order_id": order.id, "order_number": order.order_number, "status": "pending"})
 
         for admin_email in self._get_admin_emails():
             try:
@@ -149,12 +168,11 @@ class OrderService:
                     raise HTTPException(status_code=400, detail=f"Not enough stock for product #{item.product_id}")
 
         order.status = "accepted"
+        order.accepted_at = datetime.now()
         self.db.commit()
         self.db.refresh(order)
 
-        self._notify("Order Accepted", f"Order #{order.order_number} has been accepted")
-        self._notify("Order Update", f"Your order #{order.order_number} has been accepted and is being processed.", user_id=order.user_id)
-        self._notify_admins({"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": "accepted"})
+        self._notify("Order Update", f"Your order #{order.order_number} has been accepted and is being processed.", user_id=order.user_id, type="order_status", order_id=order.id)
         self._notify_user(order.user_id, {"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": "accepted"})
 
         email_to = order.contact_email
@@ -181,14 +199,15 @@ class OrderService:
 
         order.status = "rejected"
         order.reject_reason = reason
+        order.rejected_at = datetime.now()
         self.db.commit()
         self.db.refresh(order)
 
-        self._notify("Order Rejected", f"Order #{order.order_number} rejected. Reason: {reason}")
-        self._notify("Order Update", f"Your order #{order.order_number} has been rejected. Reason: {reason}", user_id=order.user_id)
-        self._notify_admins({"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": "rejected", "reason": reason})
+        self._notify("Order Update", f"Your order #{order.order_number} has been rejected. Reason: {reason}", user_id=order.user_id, type="order_status", order_id=order.id)
         self._notify_user(order.user_id, {"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": "rejected", "reason": reason})
 
+        items = self.db.query(OrderItem).filter(OrderItem.order_id == order_id).all()
+        product_names = ", ".join(item.product.name for item in items if item.product)
         email_to = order.contact_email
         if email_to:
             try:
@@ -197,7 +216,8 @@ class OrderService:
                     subject=f"Order #{order.order_number} Rejected",
                     heading="Your Order Has Been Rejected",
                     body_lines=[
-                        f"Order #{order.order_number} could not be accepted.",
+                        f"Order #{order.order_number} has been rejected.",
+                        f"Product(s): {product_names}" if product_names else "",
                         f"Reason: {reason}",
                         "If you have any questions, please contact us.",
                     ],
@@ -219,8 +239,8 @@ class OrderService:
         self.db.refresh(order)
 
         by_label = "Admin" if cancelled_by == "admin" else "Customer"
-        self._notify("Order Cancelled", f"Order #{order.order_number} cancelled by {by_label}. Reason: {reason}")
-        self._notify("Order Cancelled", f"Your order #{order.order_number} has been cancelled. Reason: {reason}", user_id=order.user_id)
+        self._notify("Order Cancelled", f"Order #{order.order_number} cancelled by {by_label}. Reason: {reason}", type="order_status", order_id=order.id)
+        self._notify("Order Cancelled", f"Your order #{order.order_number} has been cancelled. Reason: {reason}", user_id=order.user_id, type="order_status", order_id=order.id)
         self._notify_admins({"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": "cancelled", "reason": reason})
         self._notify_user(order.user_id, {"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": "cancelled", "reason": reason})
 
@@ -267,40 +287,90 @@ class OrderService:
             raise HTTPException(status_code=400, detail=f"Cannot transition from '{order.status}' to '{next_status}'")
 
         order.status = next_status
-
-        if next_status == "delivered":
-            order.delivered_at = datetime.now()
+        if next_status == "accepted":
+            order.accepted_at = datetime.now()
+        elif next_status == "packed":
+            order.packed_at = datetime.now()
+        elif next_status == "on_delivery":
+            order.on_delivery_at = datetime.now()
             items = self.db.query(OrderItem).filter(OrderItem.order_id == order_id).all()
+            from app.services.fifo_service import FifoAllocationService
+            fifo = FifoAllocationService(self.db)
             for item in items:
                 product = self.db.get(Product, item.product_id)
-                if product:
-                    if (product.stock_quantity or 0) < item.quantity:
-                        raise HTTPException(status_code=400, detail=f"Not enough stock for product #{item.product_id}")
-                    product.stock_quantity = (product.stock_quantity or 0) - item.quantity
+                if not product:
+                    continue
+                if product.stock_quantity < item.quantity:
+                    raise HTTPException(status_code=400, detail=f"Not enough stock for product #{item.product_id}")
+
+                allocations = fifo.allocate(
+                    product_id=item.product_id,
+                    variant_id=item.variant_id,
+                    quantity=item.quantity,
+                )
+                total_cost = sum(a.unit_cost * a.quantity for a in allocations)
+                avg_cost = round(total_cost / item.quantity, 2) if item.quantity > 0 else 0
+                item.unit_cost = avg_cost
+
+                product.stock_quantity = (product.stock_quantity or 0) - item.quantity
+        elif next_status == "delivered":
+            order.delivered_at = datetime.now()
 
         self.db.commit()
         self.db.refresh(order)
 
         status_labels = {"accepted": "Accepted", "packed": "Packed", "on_delivery": "On Delivery", "delivered": "Delivered"}
         label = status_labels.get(next_status, next_status)
-        self._notify("Order Update", f"Order #{order.order_number} — {label}")
-        self._notify("Order Update", f"Your order #{order.order_number} is now: {label}", user_id=order.user_id)
-        self._notify_admins({"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": next_status})
+        self._notify("Order Update", f"Your order #{order.order_number} is now: {label}", user_id=order.user_id, type="order_status", order_id=order.id)
         self._notify_user(order.user_id, {"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": next_status})
 
-        if next_status == "delivered":
+        if next_status in ("accepted", "delivered"):
             email_to = order.contact_email
             if email_to:
                 try:
-                    email_service.send_order_status_email(
-                        to_email=email_to,
-                        subject=f"Order #{order.order_number} Delivered",
-                        heading="Your Order Has Been Delivered!",
-                        body_lines=[
-                            f"Order #{order.order_number} has been delivered successfully.",
-                            "Thank you for shopping with Kallee Nepal!",
-                        ],
-                    )
+                    if next_status == "accepted":
+                        email_service.send_order_status_email(
+                            to_email=email_to,
+                            subject=f"Order #{order.order_number} Accepted",
+                            heading="Your Order Has Been Accepted!",
+                            body_lines=[
+                                f"Order #{order.order_number} has been accepted and is being processed.",
+                                "We will update you as it progresses.",
+                            ],
+                        )
+                    elif next_status == "delivered":
+                        import json as _json
+                        ship_addr = order.shipping_address
+                        if isinstance(ship_addr, dict):
+                            ship_addr_str = ship_addr.get("street", "")
+                            if ship_addr.get("city"):
+                                ship_addr_str += f", {ship_addr['city']}"
+                            if ship_addr.get("state"):
+                                ship_addr_str += f", {ship_addr['state']}"
+                        else:
+                            ship_addr_str = str(ship_addr or "")
+                        items_data = []
+                        for oi in order.items:
+                            name = oi.product.name if oi.product else f"Product #{oi.product_id}"
+                            items_data.append({
+                                "name": name,
+                                "quantity": oi.quantity,
+                                "unit_price": float(oi.unit_price),
+                                "total": float(oi.unit_price) * oi.quantity,
+                            })
+                        email_service.send_invoice_email(
+                            to_email=email_to,
+                            order_number=order.order_number,
+                            contact_name=order.contact_name or "",
+                            contact_phone=order.contact_phone or "",
+                            shipping_address=ship_addr_str,
+                            items=items_data,
+                            subtotal=float(order.total_amount) - float(order.shipping_cost or 0) - float(order.tax or 0),
+                            shipping_cost=float(order.shipping_cost or 0),
+                            tax=float(order.tax or 0),
+                            discount=float(order.discount or 0),
+                            total=float(order.total_amount),
+                        )
                 except Exception:
                     pass
 
@@ -315,12 +385,14 @@ class OrderService:
         order.refund_reason = reason
         order.refund_description = description
         order.refund_proof_images = json.dumps(proof_images or [])
+        order.refund_requested_at = datetime.now()
         self.db.commit()
         self.db.refresh(order)
 
-        self._notify("Refund Requested", f"Refund requested for order #{order.order_number}. Reason: {reason}")
-        self._notify("Refund Update", f"Your refund request for order #{order.order_number} has been submitted.", user_id=order.user_id)
-        self._notify_admins({"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": "refund_requested", "reason": reason, "description": description})
+        contact_name = order.contact_name or f"User #{order.user_id}"
+        self._notify("Refund Requested", f"Refund requested for order #{order.order_number}. Reason: {reason}", type="refund_status", order_id=order.id)
+        self._notify("Refund Update", f"Your refund request for order #{order.order_number} has been submitted.", user_id=order.user_id, type="refund_status", order_id=order.id)
+        self._notify_admins({"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": "refund_requested", "reason": reason, "description": description, "customer_name": contact_name})
         self._notify_user(order.user_id, {"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": "refund_requested", "reason": reason})
 
         for admin_email in self._get_admin_emails():
@@ -328,9 +400,9 @@ class OrderService:
                 email_service.send_order_status_email(
                     to_email=admin_email,
                     subject=f"Refund Request for Order #{order.order_number}",
-                    heading="Refund Request Received",
+                    heading=f"User {contact_name} has asked for a refund",
                     body_lines=[
-                        f"Order #{order.order_number} — Refund requested by customer.",
+                        f"Order #{order.order_number} — Refund requested by {contact_name}.",
                         f"Reason: {reason}",
                         f"Description: {description or 'N/A'}",
                     ],
@@ -346,11 +418,12 @@ class OrderService:
             raise HTTPException(status_code=400, detail=f"Cannot accept refund for order with status '{order.status}'")
 
         order.status = "refund_out_for_pickup"
+        order.refund_out_for_pickup_at = datetime.now()
         self.db.commit()
         self.db.refresh(order)
 
-        self._notify("Refund Accepted", f"Refund for Order #{order.order_number} accepted — pickup initiated")
-        self._notify("Refund Update", f"Your refund for order #{order.order_number} has been accepted. Delivery boy will pick up the item.", user_id=order.user_id)
+        self._notify("Refund Accepted", f"Refund for Order #{order.order_number} accepted — pickup initiated", type="refund_status", order_id=order.id)
+        self._notify("Refund Update", f"Your refund for order #{order.order_number} has been accepted. Delivery boy will pick up the item.", user_id=order.user_id, type="refund_status", order_id=order.id)
         self._notify_admins({"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": "refund_out_for_pickup"})
         self._notify_user(order.user_id, {"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": "refund_out_for_pickup"})
 
@@ -359,11 +432,11 @@ class OrderService:
             try:
                 email_service.send_order_status_email(
                     to_email=email_to,
-                    subject=f"Refund Accepted for Order #{order.order_number}",
-                    heading="Refund Request Accepted",
+                    subject=f"Refund — Delivery Pickup for Order #{order.order_number}",
+                    heading="Delivery Boy Will Pick Up Your Item",
                     body_lines=[
                         f"Your refund request for order #{order.order_number} has been accepted.",
-                        "A delivery boy will come to pick up the item.",
+                        "A delivery boy will come to pick up the item. Please keep the product ready.",
                     ],
                 )
             except Exception:
@@ -377,11 +450,12 @@ class OrderService:
             raise HTTPException(status_code=400, detail=f"Cannot mark item retrieved with status '{order.status}'")
 
         order.status = "item_retrieved_from_customer"
+        order.item_retrieved_from_customer_at = datetime.now()
         self.db.commit()
         self.db.refresh(order)
 
-        self._notify("Item Retrieved", f"Item for Order #{order.order_number} retrieved from customer")
-        self._notify("Refund Update", f"The item for order #{order.order_number} has been picked up from you.", user_id=order.user_id)
+        self._notify("Item Retrieved", f"Item for Order #{order.order_number} retrieved from customer", type="refund_status", order_id=order.id)
+        self._notify("Refund Update", f"The item for order #{order.order_number} has been picked up from you. Waiting for admin verification.", user_id=order.user_id, type="refund_status", order_id=order.id)
         self._notify_admins({"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": "item_retrieved_from_customer"})
         self._notify_user(order.user_id, {"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": "item_retrieved_from_customer"})
         return order
@@ -392,11 +466,12 @@ class OrderService:
             raise HTTPException(status_code=400, detail=f"Cannot mark admin retrieval with status '{order.status}'")
 
         order.status = "item_retrieved_by_admin"
+        order.item_retrieved_by_admin_at = datetime.now()
         self.db.commit()
         self.db.refresh(order)
 
-        self._notify("Item Received", f"Item for Order #{order.order_number} received by admin")
-        self._notify("Refund Update", f"The returned item for order #{order.order_number} has been received.", user_id=order.user_id)
+        self._notify("Item Received", f"Item for Order #{order.order_number} received by admin", type="refund_status", order_id=order.id)
+        self._notify("Refund Update", f"The returned item for order #{order.order_number} has been received by admin.", user_id=order.user_id, type="refund_status", order_id=order.id)
         self._notify_admins({"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": "item_retrieved_by_admin"})
         self._notify_user(order.user_id, {"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": "item_retrieved_by_admin"})
         return order
@@ -408,11 +483,12 @@ class OrderService:
 
         order.status = "refund_on_the_way"
         order.refund_payment_proof = proof_image
+        order.refund_on_the_way_at = datetime.now()
         self.db.commit()
         self.db.refresh(order)
 
-        self._notify("Refund Payment Initiated", f"Refund payment for Order #{order.order_number} is on the way")
-        self._notify("Refund Update", f"Your refund for order #{order.order_number} is on the way!", user_id=order.user_id)
+        self._notify("Refund Payment Initiated", f"Refund payment for Order #{order.order_number} is on the way", type="refund_status", order_id=order.id)
+        self._notify("Refund Update", f"Your refund for order #{order.order_number} is on the way!", user_id=order.user_id, type="refund_status", order_id=order.id)
         self._notify_admins({"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": "refund_on_the_way"})
         self._notify_user(order.user_id, {"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": "refund_on_the_way"})
 
@@ -422,9 +498,9 @@ class OrderService:
                 email_service.send_order_status_email(
                     to_email=email_to,
                     subject=f"Refund on the Way — Order #{order.order_number}",
-                    heading="Refund Payment Initiated",
+                    heading="Refund Approved & Payment Sent",
                     body_lines=[
-                        f"Your refund for order #{order.order_number} is on the way.",
+                        f"Your refund for order #{order.order_number} has been approved and the payment is on the way.",
                         "It should reflect in your account shortly.",
                     ],
                 )
@@ -438,14 +514,31 @@ class OrderService:
         if order.status != "refund_on_the_way":
             raise HTTPException(status_code=400, detail=f"Cannot complete refund with status '{order.status}'")
 
+        # Return stock to FIFO batches at original cost
+        from app.services.fifo_service import FifoAllocationService
+        fifo = FifoAllocationService(self.db)
+        items = self.db.query(OrderItem).filter(OrderItem.order_id == order_id).all()
+        for item in items:
+            product = self.db.get(Product, item.product_id)
+            if product:
+                cost = float(item.unit_cost) if item.unit_cost else 0
+                fifo.return_stock(
+                    product_id=item.product_id,
+                    variant_id=item.variant_id,
+                    quantity=item.quantity,
+                    unit_cost=cost,
+                )
+                product.stock_quantity = (product.stock_quantity or 0) + item.quantity
+
         order.status = "refund_successful"
+        order.refund_successful_at = datetime.now()
         if proof_image:
             order.refund_payment_proof = proof_image
         self.db.commit()
         self.db.refresh(order)
 
-        self._notify("Refund Complete", f"Refund for Order #{order.order_number} completed successfully")
-        self._notify("Refund Update", f"Your refund for order #{order.order_number} has been completed!", user_id=order.user_id)
+        self._notify("Refund Complete", f"Refund for Order #{order.order_number} completed successfully", type="refund_status", order_id=order.id)
+        self._notify("Refund Update", f"Your refund for order #{order.order_number} has been completed!", user_id=order.user_id, type="refund_status", order_id=order.id)
         self._notify_admins({"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": "refund_successful"})
         self._notify_user(order.user_id, {"type": "order_status", "order_id": order.id, "order_number": order.order_number, "status": "refund_successful"})
 
@@ -487,8 +580,25 @@ class OrderService:
     def get_one_order(self, user_id: int, order_id: int):
         return self.crud.get_order_by_id(user_id, order_id)
 
+    def get_admin_order(self, order_id: int):
+        order = self._get_order_or_404(order_id)
+        return _to_list_response(order)
+
+    def get_order_by_number(self, order_number: str):
+        order = self.db.query(Order).filter(Order.order_number == order_number).first()
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+        return _to_list_response(order)
+
 
 def _to_list_response(order: Order) -> OrderListResponse:
+    ship_addr = None
+    if order.shipping_address:
+        ship_addr = {
+            "street": order.shipping_address.street,
+            "city": order.shipping_address.city,
+            "state": order.shipping_address.state,
+        }
     return OrderListResponse(
         id=order.id,
         order_number=order.order_number,
@@ -501,12 +611,21 @@ def _to_list_response(order: Order) -> OrderListResponse:
                 variant_id=item.variant_id,
                 quantity=item.quantity,
                 unit_price=float(item.unit_price),
+                unit_cost=float(item.unit_cost) if item.unit_cost else None,
+                name=item.product.name if item.product else None,
+                size=item.variant.name if item.variant else None,
+                variant_name=item.variant.name if item.variant else None,
             )
             for item in order.order_items
         ],
         contact_name=order.contact_name or "",
         contact_phone=order.contact_phone or "",
+        contact_email=order.contact_email or "",
         payment_mode=order.payment_mode or "cod",
+        shipping_cost=float(order.shipping_cost or 0),
+        tax=float(order.tax or 0),
+        discount=float(order.discount or 0),
+        shipping_address=ship_addr,
         cancel_reason=order.cancel_reason,
         cancelled_by=order.cancelled_by,
         reject_reason=order.reject_reason,
@@ -514,5 +633,14 @@ def _to_list_response(order: Order) -> OrderListResponse:
         refund_description=order.refund_description,
         refund_proof_images=order.refund_proof_images,
         refund_payment_proof=order.refund_payment_proof,
+        accepted_at=order.accepted_at,
+        packed_at=order.packed_at,
+        on_delivery_at=order.on_delivery_at,
         delivered_at=order.delivered_at,
+        refund_requested_at=order.refund_requested_at,
+        refund_out_for_pickup_at=order.refund_out_for_pickup_at,
+        item_retrieved_from_customer_at=order.item_retrieved_from_customer_at,
+        item_retrieved_by_admin_at=order.item_retrieved_by_admin_at,
+        refund_on_the_way_at=order.refund_on_the_way_at,
+        refund_successful_at=order.refund_successful_at,
     )

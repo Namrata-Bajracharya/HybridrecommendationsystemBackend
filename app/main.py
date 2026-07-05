@@ -1,4 +1,5 @@
 import json
+import asyncio
 import socketio
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
@@ -49,6 +50,14 @@ def add_missing_columns(db):
         ("orders", "cancel_reason", "VARCHAR(500)"),
         ("orders", "cancelled_by", "VARCHAR(50)"),
         ("orders", "refund_reason", "VARCHAR(500)"),
+        ("orders", "rejected_at", "DATETIME"),
+        ("reviews", "reply", "TEXT"),
+        ("reviews", "replied_at", "DATETIME"),
+        ("products", "buying_price", "NUMERIC(10,2)"),
+        ("products", "selling_price", "NUMERIC(10,2)"),
+        ("product_variants", "buying_price", "FLOAT"),
+        ("product_variants", "selling_price", "FLOAT"),
+        ("orderitems", "unit_cost", "NUMERIC(10,2)"),
     ]
     for table, col, coltype in migs:
         try:
@@ -62,6 +71,13 @@ def add_missing_columns(db):
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Application starting...")
+
+    # Store the main event loop for socket emits from sync thread-pool handlers
+    from app.services.order_service import set_main_loop
+    try:
+        set_main_loop(asyncio.get_running_loop())
+    except RuntimeError:
+        pass
 
     db = SessionLocal()
     try:
@@ -100,6 +116,48 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 db.commit()
         except Exception as e:
             logger.exception("Failed to seed admin user: %s", e)
+
+        # Seed categories if empty
+        try:
+            from app.models.category import Category
+            if db.query(Category).count() == 0:
+                from app.utils.seed_categories import seed as seed_cats
+                seed_cats()
+                logger.info("Seeded categories")
+        except Exception as e:
+            logger.exception("Failed to seed categories: %s", e)
+
+        # Seed products if empty
+        try:
+            from app.models.product import Product
+            if db.query(Product).count() == 0:
+                from app.utils.seed_products import seed as seed_prods
+                seed_prods()
+                logger.info("Seeded products")
+        except Exception as e:
+            logger.exception("Failed to seed products: %s", e)
+
+        # Seed rejection reasons
+        try:
+            from app.models.rejection_reason import RejectionReason
+            existing = db.query(RejectionReason).count()
+            if existing == 0:
+                reasons = [
+                    "Out of stock",
+                    "Invalid address",
+                    "Customer requested cancellation",
+                    "Payment not received",
+                    "Product damaged in warehouse",
+                    "Shipping not available in area",
+                    "Duplicate order",
+                    "Other",
+                ]
+                for r in reasons:
+                    db.add(RejectionReason(reason=r))
+                db.commit()
+                logger.info("Seeded %d rejection reasons", len(reasons))
+        except Exception as e:
+            logger.exception("Failed to seed rejection reasons: %s", e)
     finally:
         db.close()
 
@@ -291,6 +349,9 @@ async def websocket_endpoint(
 
 
 socket_app = socketio.ASGIApp(sio, other_asgi_app=app)
+
+# Make socket_app the top-level ASGI app so WebSocket requests reach socket.io
+app = socket_app
 
 # Optional startup utilities
 # seed_product()

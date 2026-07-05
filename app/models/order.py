@@ -37,6 +37,9 @@ class Order(Base):
     order_date: Mapped[datetime] = mapped_column(
         DateTime, default=func.current_timestamp()
     )
+    accepted_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    packed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    on_delivery_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     shipped_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     tx_ref: Mapped[str] = mapped_column(String(255), unique=True)
     payment_status: Mapped[str] = mapped_column(
@@ -51,6 +54,7 @@ class Order(Base):
     tax: Mapped[float] = mapped_column(Numeric(10, 2), default=0)
     discount: Mapped[float] = mapped_column(Numeric(10, 2), default=0)
     delivered_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    rejected_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     cancel_reason: Mapped[str] = mapped_column(String(500), nullable=True)
     cancelled_by: Mapped[str] = mapped_column(String(50), nullable=True)
     reject_reason: Mapped[str] = mapped_column(String(500), nullable=True)
@@ -58,6 +62,12 @@ class Order(Base):
     refund_description: Mapped[str] = mapped_column(String(1000), nullable=True)
     refund_proof_images: Mapped[str] = mapped_column(String(2000), nullable=True)
     refund_payment_proof: Mapped[str] = mapped_column(String(500), nullable=True)
+    refund_requested_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    refund_out_for_pickup_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    item_retrieved_from_customer_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    item_retrieved_by_admin_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    refund_on_the_way_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    refund_successful_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="orders")

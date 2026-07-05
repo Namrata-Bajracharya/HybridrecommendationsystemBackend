@@ -25,6 +25,14 @@ class ReviewCrud:
         self.db.refresh(db_review)
         return db_review
 
+    def get_reviews_by_user(self, user_id: int) -> List[Review]:
+        stmt = (
+            select(Review)
+            .where(Review.user_id == user_id)
+            .order_by(Review.created_at.desc())
+        )
+        return list(self.db.execute(stmt).scalars().all())
+
     def get_reviews_by_product(
         self, product_id: int, skip: int = 0, limit: int = 100
     ) -> List[Review]:

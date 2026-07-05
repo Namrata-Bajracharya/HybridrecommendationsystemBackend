@@ -66,6 +66,15 @@ def list_all_orders(
     return order_service.list_all_orders()
 
 
+@router.get("/admin/{order_id}", response_model=OrderListResponse)
+def get_admin_order(
+    _: user_dependency,
+    order_service: order_dependency,
+    order_id: int,
+):
+    return order_service.get_admin_order(order_id)
+
+
 @router.patch("/{order_id}/accept", response_model=OrderListResponse)
 def accept_order(
     order_id: int,
@@ -173,8 +182,27 @@ def customer_cancel(
     return order_service.customer_cancel(order_id, payload.reason)
 
 
+@router.get("/by-number/{order_number}", response_model=OrderListResponse)
+def get_order_by_number(
+    _: user_dependency, order_service: order_dependency, order_number: str
+):
+    return order_service.get_order_by_number(order_number)
+
+
 @router.get("/{order_id}", response_model=OrderResponse)
 def get_single_order(
     current_user: user_dependency, order_service: order_dependency, order_id: int
 ):
     return order_service.get_one_order(current_user.id, order_id)
+
+
+@router.get("/{order_id}/invoice", response_model=OrderListResponse)
+def get_order_invoice(
+    current_user: user_dependency, order_service: order_dependency, order_id: int
+):
+    try:
+        return order_service.get_one_order(current_user.id, order_id)
+    except Exception:
+        if current_user.role == "admin":
+            return order_service.get_admin_order(order_id)
+        raise HTTPException(status_code=404, detail="Order not found")

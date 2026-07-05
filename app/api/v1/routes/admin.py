@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, status, HTTPException
 from typing import Annotated, List
 from datetime import datetime
 
@@ -21,6 +21,7 @@ from app.schema.admin_schema import (
     PurchaseOrderResponse,
     NotificationCreate,
     NotificationResponse,
+    RejectionReasonResponse,
 )
 from app.schema.user_schema import UserPublic
 
@@ -92,7 +93,7 @@ def create_purchase_order(create: PurchaseOrderCreate, admin: Annotated[UserPubl
 
 @router.post("/notifications", response_model=NotificationResponse, status_code=status.HTTP_201_CREATED)
 def create_notification(create: NotificationCreate, admin: Annotated[UserPublic, Depends(require_admin)], svc: Annotated[AdminService, Depends(get_admin_service)]):
-    return svc.create_notification(user_id=create.user_id, title=create.title, message=create.message)
+    return svc.create_notification(user_id=create.user_id, title=create.title, message=create.message, type=create.type, order_id=create.order_id)
 
 
 @router.get("/notifications/me", response_model=List[NotificationResponse])
@@ -100,6 +101,27 @@ def my_notifications(current_user: Annotated[UserPublic, Depends(get_optional_us
     if not current_user:
         return []
     return svc.list_notifications_for_user(current_user.id)
+
+
+@router.patch("/notifications/{notification_id}/read", response_model=NotificationResponse)
+def mark_notification_read(
+    notification_id: int,
+    current_user: Annotated[UserPublic, Depends(get_optional_user)],
+    svc: Annotated[AdminService, Depends(get_admin_service)],
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return svc.mark_notification_read(notification_id)
+
+
+@router.get("/rejection-reasons", response_model=List[RejectionReasonResponse])
+def list_rejection_reasons(svc: Annotated[AdminService, Depends(get_admin_service)]):
+    return svc.list_rejection_reasons()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Second section — dashboard, analytics, user & order management
+# ═══════════════════════════════════════════════════════════════════
 from fastapi import APIRouter, Depends, Query, status
 from typing import Annotated, Optional
 from datetime import datetime
@@ -113,19 +135,27 @@ from app.schema.admin_schema import (
     ProductAnalytics,
     ReviewAnalytics,
     UserManagementResponse,
+    UserDetailResponse,
     UpdateUserRoleRequest,
     OrderManagementResponse,
     UpdateOrderStatusRequest,
     MarkOrderShippedRequest,
     ReviewModerationResponse,
     InventoryAlert,
+    InventoryResponse,
     BulkInventoryUpdateRequest,
     BulkInventoryUpdateResponse,
+    RestockRequest,
+    RestockResponse,
+    ProfitReportResponse,
+    ProductProfitReportResponse,
+    OrderReportResponse,
+    AdminWishlistResponse,
 )
+from app.schema.review_schema import ReviewResponse, ReviewReplyRequest
 from app.schema.user_schema import UserPublic
+from app.services.review_service import ReviewService
 from sqlalchemy.orm import Session
-
-router = APIRouter(tags=["Admin"])
 
 
 def get_admin_service(db: Annotated[Session, Depends(get_db)]) -> AdminService:
@@ -242,6 +272,21 @@ async def update_user_role(
     """Update a user's role"""
     user = admin_service.update_user_role(user_id=user_id, new_role=role_update.role)
     return UserPublic.model_validate(user)
+
+
+@router.get(
+    "/users/{user_id}",
+    response_model=UserDetailResponse,
+    summary="Get user detail",
+    description="Get detailed user info with orders, spending, wishlist and stats",
+)
+async def get_user_detail(
+    user_id: int,
+    admin_service: Annotated[AdminService, Depends(get_admin_service)],
+    current_admin: Annotated[UserPublic, Depends(require_admin)],
+):
+    """Get detailed information about a specific user/customer"""
+    return admin_service.get_user_detail(user_id=user_id)
 
 
 # Order Management Endpoints
@@ -376,7 +421,52 @@ async def reject_review(
     return None
 
 
+def get_review_service(db: Annotated[Session, Depends(get_db)]) -> ReviewService:
+    return ReviewService(db=db)
+
+
+@router.patch(
+    "/reviews/{review_id}/reply",
+    response_model=ReviewResponse,
+    summary="Reply to a review",
+    description="Admin replies to a customer review",
+)
+async def reply_to_review(
+    review_id: int,
+    payload: ReviewReplyRequest,
+    review_service: Annotated[ReviewService, Depends(get_review_service)],
+    current_admin: Annotated[UserPublic, Depends(require_admin)],
+):
+    """Admin replies to a review"""
+    return review_service.reply_to_review(review_id=review_id, user_id=current_admin.id, payload=payload)
+
+
+# Wishlist Management Endpoint
+@router.get("/wishlist", response_model=AdminWishlistResponse)
+async def list_all_wishlists(
+    admin_service: Annotated[AdminService, Depends(get_admin_service)],
+    current_admin: Annotated[UserPublic, Depends(require_admin)],
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
+    """Get paginated list of all wishlist items across users."""
+    return admin_service.get_all_wishlists(page=page, page_size=page_size)
+
+
 # Inventory Management Endpoints
+@router.get("/inventory", response_model=InventoryResponse)
+async def list_inventory(
+    admin_service: Annotated[AdminService, Depends(get_admin_service)],
+    current_admin: Annotated[UserPublic, Depends(require_admin)],
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    search: Optional[str] = Query(None, description="Search by product name or SKU"),
+    low_stock: Optional[bool] = Query(None, description="Filter products with stock < 10"),
+):
+    """Get paginated inventory list with last restock date and summary."""
+    return admin_service.get_inventory(page=page, page_size=page_size, search=search, low_stock=low_stock)
+
+
 @router.get(
     "/inventory/low-stock",
     response_model=list[InventoryAlert],
@@ -405,3 +495,51 @@ async def bulk_update_inventory(
 ):
     """Bulk update product inventory"""
     return admin_service.bulk_update_inventory(updates=update_request.updates)
+
+
+@router.post("/inventory/restock", response_model=RestockResponse)
+async def restock_product(
+    payload: RestockRequest,
+    admin_service: Annotated[AdminService, Depends(get_admin_service)],
+    current_admin: Annotated[UserPublic, Depends(require_admin)],
+):
+    """Restock a product — creates a stock batch for FIFO cost tracking"""
+    return admin_service.restock_product(
+        product_id=payload.product_id,
+        variant_id=payload.variant_id,
+        quantity=payload.quantity,
+        unit_cost=payload.unit_cost,
+        supplier_id=payload.supplier_id,
+        new_buying_price=payload.new_buying_price,
+        new_selling_price=payload.new_selling_price,
+    )
+
+
+@router.get("/reports/profit", response_model=ProfitReportResponse)
+async def get_profit_report(
+    admin_service: Annotated[AdminService, Depends(get_admin_service)],
+    current_admin: Annotated[UserPublic, Depends(require_admin)],
+    period: str = Query("all_time", description="Filter: today, week, month, all_time"),
+):
+    """Get profit/loss report across delivered orders"""
+    return admin_service.get_profit_report(period=period)
+
+
+@router.get("/reports/product-profit", response_model=ProductProfitReportResponse)
+async def get_product_profit_report(
+    admin_service: Annotated[AdminService, Depends(get_admin_service)],
+    current_admin: Annotated[UserPublic, Depends(require_admin)],
+    period: str = Query("all_time", description="Filter: today, week, month, year, all_time"),
+):
+    """Get per-product profit report"""
+    return admin_service.get_product_profit_report(period=period)
+
+
+@router.get("/reports/orders", response_model=OrderReportResponse)
+async def get_orders_report(
+    admin_service: Annotated[AdminService, Depends(get_admin_service)],
+    current_admin: Annotated[UserPublic, Depends(require_admin)],
+    period: str = Query("all_time", description="Filter: today, week, month, year, all_time"),
+):
+    """Get orders report listing all orders"""
+    return admin_service.get_orders_report(period=period)

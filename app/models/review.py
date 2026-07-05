@@ -23,6 +23,8 @@ class Review(Base):
         DateTime, default=func.current_timestamp()
     )
     is_approved: Mapped[bool] = mapped_column(Boolean, default=False)
+    reply: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    replied_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="reviews")

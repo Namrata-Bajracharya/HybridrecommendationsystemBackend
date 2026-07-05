@@ -138,11 +138,21 @@ class PurchaseOrderResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# Rejection Reason
+class RejectionReasonResponse(BaseModel):
+    id: int
+    reason: str
+
+    model_config = {"from_attributes": True}
+
+
 # Notification
 class NotificationCreate(BaseModel):
     user_id: Optional[int]
     title: str
     message: str
+    type: Optional[str] = None
+    order_id: Optional[int] = None
 
 
 class NotificationResponse(BaseModel):
@@ -150,6 +160,8 @@ class NotificationResponse(BaseModel):
     user_id: Optional[int]
     title: str
     message: str
+    type: Optional[str] = None
+    order_id: Optional[int] = None
     read: bool
     created_at: datetime
 
@@ -352,3 +364,168 @@ class BulkInventoryUpdateResponse(BaseModel):
     failed_products: List[int] = Field(
         default_factory=list, description="Product IDs that failed to update"
     )
+
+
+# Restock
+class RestockRequest(BaseModel):
+    product_id: int
+    variant_id: Optional[int] = Field(None, description="Variant ID if restocking a variant")
+    quantity: int = Field(..., gt=0, description="Quantity being added")
+    unit_cost: float = Field(..., gt=0, description="Cost per unit for this batch")
+    supplier_id: Optional[int] = Field(None, description="Supplier for this purchase order")
+    new_buying_price: Optional[float] = Field(None, ge=0, description="New buying price for the product")
+    new_selling_price: Optional[float] = Field(None, ge=0, description="New selling price for the product")
+
+
+class RestockResponse(BaseModel):
+    product_id: int
+    name: str
+    previous_stock: int
+    new_stock: int
+    batch_unit_cost: float
+    batch_quantity: int
+
+
+# Profit / Loss Report
+class ProfitReportItem(BaseModel):
+    product_id: int
+    product_name: str
+    units_sold: int
+    revenue: float
+    cost: float
+    profit: float
+    margin: Optional[float] = None
+
+
+class ProfitReportResponse(BaseModel):
+    total_revenue: float
+    total_cost: float
+    total_profit: float
+    overall_margin: Optional[float] = None
+    period: str = "all_time"
+    items: List[ProfitReportItem]
+
+
+class ProductProfitItem(BaseModel):
+    product_id: int
+    product_name: str
+    sku: Optional[str] = None
+    stock_quantity: int = 0
+    total_revenue: float = 0
+    total_cost: float = 0
+    total_profit: float = 0
+    total_units_sold: int = 0
+    last_purchase_cost: Optional[float] = None
+    last_restock_date: Optional[datetime] = None
+
+
+class ProductProfitReportResponse(BaseModel):
+    period: str = "all_time"
+    items: List[ProductProfitItem]
+
+
+class OrderReportItem(BaseModel):
+    id: int
+    order_number: str
+    contact_name: Optional[str] = None
+    total_amount: float
+    order_date: datetime
+    delivered_at: Optional[datetime] = None
+    rejected_at: Optional[datetime] = None
+    status: str
+
+
+class OrderReportResponse(BaseModel):
+    period: str = "all_time"
+    items: List[OrderReportItem]
+
+
+# Inventory List
+class InventoryItem(BaseModel):
+    product_id: int
+    name: str
+    sku: Optional[str] = None
+    stock_quantity: int = 0
+    buying_price: Optional[float] = None
+    selling_price: Optional[float] = None
+    is_active: bool = True
+    last_restock_at: Optional[datetime] = None
+    days_since_restock: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+
+class InventorySummary(BaseModel):
+    total_products: int = 0
+    in_stock: int = 0
+    low_stock: int = 0
+    out_of_stock: int = 0
+
+
+class InventoryResponse(BaseModel):
+    items: List[InventoryItem]
+    total: int
+    page: int
+    page_size: int
+    summary: InventorySummary
+
+
+# User Detail
+class UserOrderItemSummary(BaseModel):
+    id: int
+    order_number: str
+    total_amount: float
+    status: str
+    order_date: datetime
+    payment_mode: str = "cod"
+    item_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class UserDetailResponse(BaseModel):
+    id: int
+    email: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone: Optional[str] = None
+    role: str = "customer"
+    created_at: datetime
+    total_orders: int = 0
+    total_spent: float = 0
+    today_orders: int = 0
+    today_spend: float = 0
+    pending_orders: int = 0
+    wishlist_count: int = 0
+    products_count: int = 0
+    orders_by_status: dict[str, int] = Field(default_factory=dict)
+    recent_orders: List[UserOrderItemSummary] = Field(default_factory=list)
+    wishlist_product_ids: List[int] = Field(default_factory=list)
+
+    class Config:
+        from_attributes = True
+
+
+# Admin Wishlist
+class AdminWishlistItem(BaseModel):
+    id: int
+    user_id: int
+    user_email: str
+    user_name: Optional[str] = None
+    product_id: int
+    product_name: str
+    product_price: float = 0
+    product_image: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AdminWishlistResponse(BaseModel):
+    items: List[AdminWishlistItem]
+    total: int
+    page: int
+    page_size: int

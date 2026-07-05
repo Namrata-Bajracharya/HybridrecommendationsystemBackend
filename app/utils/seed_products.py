@@ -9,20 +9,17 @@ Distribution:
   Books (10):         fiction(2) + nonfiction(2) + academic(2)
                       + children(2) + comics(2)
 
-Variants (4 sets):
-  2 for clothes, 2 for electronics — each group has 1 base-priced + 1 custom-priced.
-
 Usage:
     python -m app.utils.seed_products
 """
+import base64
+import io
 import random
-from itertools import product as iter_product
+from PIL import Image
 from app.db.database import SessionLocal
 from app.crud.product import ProductCrud
 from app.crud.category import CategoryCrud
-from app.crud.variant import VariantCrud
 from app.schema.product_schema import ProductCreate
-from app.schema.variant_schema import VariantCreate
 
 
 random.seed(42)
@@ -39,6 +36,41 @@ ADJECTIVES = [
     "Elite", "Essential", "Deluxe", "Superior", "Advanced", "Slim",
     "Compact", "Professional", "Standard", "Portable", "Smart",
 ]
+
+# One placeholder image slot per root category (used for all products in that category)
+SEED_SLOTS = {
+    "clothes":     [{"name": "clothes_1", "rgb": (200, 160, 160)},
+                    {"name": "clothes_2", "rgb": (160, 180, 200)}],
+    "electronics": [{"name": "electronics_1", "rgb": (180, 190, 210)},
+                    {"name": "electronics_2", "rgb": (160, 200, 180)}],
+    "sports":      [{"name": "sports_1", "rgb": (200, 190, 150)},
+                    {"name": "sports_2", "rgb": (180, 200, 180)}],
+    "books":       [{"name": "books_1", "rgb": (180, 160, 140)},
+                    {"name": "books_2", "rgb": (190, 180, 200)}],
+}
+
+
+def _make_data_url(rgb: tuple[int, int, int]) -> str:
+    """Create a base64 data URL for a solid-colour 800×800 JPEG image."""
+    img = Image.new("RGB", (800, 800), rgb)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=75)
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    return f"data:image/jpeg;base64,{b64}"
+
+
+def _ensure_seed_images() -> dict[str, list[str]]:
+    """Generate base64 data URLs for each root slot.
+
+    Returns {root_slug: [data_url, ...]}.
+    """
+    slot_urls: dict[str, list[str]] = {}
+    for root_slug, slots in SEED_SLOTS.items():
+        urls = []
+        for slot in slots:
+            urls.append(_make_data_url(slot["rgb"]))
+        slot_urls[root_slug] = urls
+    return slot_urls
 
 
 def _price_for(root_slug: str) -> float:
@@ -112,21 +144,22 @@ def seed():
                         "children": 2, "comics": 2},
     }
 
+    # Pre-create seed image data URLs
+    slot_urls = _ensure_seed_images()
+
     # Map slug → root
     roots = cat_crud.get_root_categories()
     slug_to_root = {r.slug: r for r in roots}
 
     created = 0
     skipped = 0
-    # Keep track of created product IDs per root slug for variant seeding
-    product_ids: dict[str, list[int]] = {}
 
     for root_slug, subs in TARGET_SLUGS.items():
         root = slug_to_root.get(root_slug)
         if not root:
             print(f"  Root '{root_slug}' not found — skipping")
             continue
-        product_ids[root_slug] = []
+        root_images = slot_urls.get(root_slug, [])
 
         for sub_name, count in subs.items():
             child = next((c for c in (root.children or []) if c.name == sub_name), None)
@@ -141,26 +174,33 @@ def seed():
                 fvals = _pick_options(child.fields)
                 name = _product_name(child.name, fvals)
                 desc = _description(name)
+                p = _price_for(root_slug)
+                bp = round(p * random.uniform(0.4, 0.8), 2)
 
                 dto = ProductCreate(
                     name=name,
                     description=desc,
-                    price=_price_for(root_slug),
+                    price=p,
+                    buying_price=bp,
+                    selling_price=p,
                     stock_quantity=random.randint(0, 200),
                     field_values=fvals,
                     category_id=child.id,
                     is_active=True,
+                    image_data_urls=(
+                        [random.choice(root_images)]
+                        if root_images
+                        else None
+                    ),
                 )
                 try:
-                    prod = prod_crud.create_product(dto)
+                    prod_crud.create_product(dto)
                     created += 1
-                    product_ids[root_slug].append(prod.id)
                 except Exception:
                     try:
                         dto.name = f"{name} {random.randint(1, 99)}"
-                        prod = prod_crud.create_product(dto)
+                        prod_crud.create_product(dto)
                         created += 1
-                        product_ids[root_slug].append(prod.id)
                     except Exception as e2:
                         print(f"    FAILED: {dto.name} — {e2}")
                         skipped += 1
@@ -170,105 +210,6 @@ def seed():
     db.close()
     print(f"\nDone! Created {created} products, skipped {skipped}.")
 
-    # Return IDs so seed_variants can use them
-    return product_ids
-
-
-def seed_variants(product_ids: dict[str, list[int]] | None = None):
-    """Add 4 variant sets: 2 clothes + 2 electronics.
-
-    For each group:
-      1st product — all variants use base price (price=None)
-      2nd product — some variants have custom prices
-    """
-    from sqlalchemy import select
-    from app.models.product import Product
-
-    db = SessionLocal()
-    var_crud = VariantCrud(db)
-
-    if product_ids is None:
-        # Fallback: pick any products
-        stmt = select(Product).where(Product.is_active == True, Product.stock_quantity > 0)
-        products = [p for p in db.scalars(stmt).all() if len(p.variants or []) == 0]
-    else:
-        # Use tracked IDs
-        stmt = select(Product).where(Product.id.in_(
-            product_ids.get("clothes", []) + product_ids.get("electronics", [])
-        ), Product.stock_quantity > 0)
-        products = [p for p in db.scalars(stmt).all() if len(p.variants or []) == 0]
-
-    random.shuffle(products)
-
-    clothes_prods = [p for p in products if p.category and p.category.parent and p.category.parent.slug == "clothes"]
-    electronics_prods = [p for p in products if p.category and p.category.parent and p.category.parent.slug == "electronics"]
-
-    if len(clothes_prods) < 2:
-        print("  Not enough clothes products for variants")
-    else:
-        _add_variant_set(var_crud, clothes_prods[0], use_base_price=True)
-        _add_variant_set(var_crud, clothes_prods[1], use_base_price=False)
-
-    if len(electronics_prods) < 2:
-        print("  Not enough electronics products for variants")
-    else:
-        _add_variant_set(var_crud, electronics_prods[0], use_base_price=True)
-        _add_variant_set(var_crud, electronics_prods[1], use_base_price=False)
-
-    db.close()
-    print("Variant seeding done.")
-
-
-def _add_variant_set(var_crud: VariantCrud, product, use_base_price: bool):
-    """Add Color x Size variants to a product."""
-    colors = ["Red", "Blue", "Black"]
-    sizes = ["S", "M", "L"]
-    base = int(product.price)
-
-    price_map = {}
-    if use_base_price:
-        # All variants use base product price
-        for c in colors:
-            for s in sizes:
-                price_map[(c, s)] = None
-    else:
-        # Some variants get custom prices
-        price_map = {
-            ("Red", "S"): None,
-            ("Red", "M"): int(base * 1.1),
-            ("Red", "L"): None,
-            ("Blue", "S"): int(base * 0.9),
-            ("Blue", "M"): None,
-            ("Blue", "L"): None,
-            ("Black", "S"): None,
-            ("Black", "M"): int(base * 1.2),
-            ("Black", "L"): int(base * 0.85),
-        }
-
-    created = 0
-    for color in colors:
-        for size in sizes:
-            attrs = [
-                {"name": "Color", "value": color},
-                {"name": "Size", "value": size},
-            ]
-            name = f"{color} / {size}"
-            dto = VariantCreate(
-                name=name,
-                attributes=attrs,
-                price=price_map.get((color, size)),
-                stock_quantity=random.randint(5, 30),
-            )
-            try:
-                var_crud.create(product.id, dto)
-                created += 1
-            except Exception as e:
-                print(f"    FAILED variant {name}: {e}")
-
-    mode = "base-price" if use_base_price else "custom-price"
-    print(f"  Added {created} variants ({mode}) to '{product.name}'")
-
 
 if __name__ == "__main__":
-    pids = seed()
-    seed_variants(pids)
+    seed()

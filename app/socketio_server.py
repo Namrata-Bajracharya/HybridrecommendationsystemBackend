@@ -5,12 +5,8 @@ from app.db.database import SessionLocal
 
 sio = socketio.AsyncServer(
     async_mode="asgi",
-    cors_allowed_origins=[
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-    ],
+    cors_allowed_origins="*",
+    cors_credentials=True,
 )
 
 
@@ -46,9 +42,9 @@ async def connect(sid, environ, auth):
         finally:
             db.close()
 
-        sio.enter_room(sid, f"user:{user_id}")
+        await sio.enter_room(sid, f"user:{user_id}")
         if is_admin:
-            sio.enter_room(sid, "admins")
+            await sio.enter_room(sid, "admins")
     except (TokenError, ValueError, Exception):
         pass
 

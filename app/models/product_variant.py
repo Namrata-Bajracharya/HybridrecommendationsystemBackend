@@ -13,6 +13,8 @@ class ProductVariant(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     attributes: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
     price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    buying_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    selling_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     stock_quantity: Mapped[int] = mapped_column(Integer, default=0)
     sku: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     image_document_id: Mapped[Optional[str]] = mapped_column(ForeignKey("documents.id"), nullable=True)
@@ -21,3 +23,7 @@ class ProductVariant(Base):
 
     product: Mapped["Product"] = relationship("Product", back_populates="variants")
     image_document: Mapped[Optional["Document"]] = relationship("Document")
+
+    @property
+    def document(self):
+        return self.image_document

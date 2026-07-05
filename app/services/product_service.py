@@ -104,7 +104,7 @@ class ProductService:
     ) -> PaginatedResponse[ProductResponse]:
         """List all products with advanced filtering and sorting."""
         try:
-            products = self.crud.get_all_products(
+            paginated = self.crud.get_all_products(
                 page,
                 per_page,
                 search,
@@ -116,7 +116,8 @@ class ProductService:
                 sort_by,
                 sort_order,
             )
-            return products
+            paginated.data = [ProductResponse.model_validate(p) for p in paginated.data]
+            return paginated
         except Exception as e:
             logger.info(f"exception: {e}")
             raise HTTPException(

@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from typing import List
+import asyncio
 
 from app.crud.wishlist import WishlistCrud
 from app.crud.product import ProductCrud
@@ -11,6 +12,27 @@ from app.schema.wishlist_schema import (
     WishlistStatsResponse,
     WishlistActionResponse,
 )
+from app.services.notification_service import NotificationService
+from app.socketio_server import sio
+from app.models.user import User
+
+
+def _get_main_loop():
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.new_event_loop()
+
+
+def _run_async(coro):
+    loop = _get_main_loop()
+    if loop.is_running():
+        asyncio.run_coroutine_threadsafe(coro, loop)
+    else:
+        try:
+            asyncio.ensure_future(coro)
+        except RuntimeError:
+            pass
 
 
 class WishlistService:
@@ -43,6 +65,27 @@ class WishlistService:
             return WishlistActionResponse(
                 message="Product is already in your wishlist", product_id=product_id
             )
+
+        # Notify admins about wishlist addition
+        try:
+            user = self.db.query(User).filter(User.id == user_id).first()
+            user_name = user.first_name or user.email or f"User #{user_id}"
+            product_name = product.name or f"Product #{product_id}"
+
+            notif = NotificationService(self.db)
+            notif.create_notification(
+                title="New Wishlist Item",
+                message=f"{user_name} added {product_name} to wishlist",
+                type="new_wishlist",
+            )
+            _run_async(sio.emit("message", {
+                "type": "new_wishlist",
+                "user_name": user_name,
+                "product_id": product_id,
+                "product_name": product_name,
+            }, room="admins"))
+        except Exception:
+            pass
 
         return WishlistActionResponse(
             message="Product added to wishlist successfully", product_id=product_id

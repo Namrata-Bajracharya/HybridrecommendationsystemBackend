@@ -42,6 +42,15 @@ def get_reviews_by_product(
     )
 
 
+@router.get("/user/me", response_model=List[ReviewResponse])
+def get_my_reviews(
+    review_service: review_dependency,
+    current_user: user_dependency,
+):
+    """Get all reviews by the current user."""
+    return review_service.get_reviews_by_user(user_id=current_user.id)
+
+
 @router.get("/{review_id}", response_model=ReviewResponse)
 def get_review(
     review_id: int,

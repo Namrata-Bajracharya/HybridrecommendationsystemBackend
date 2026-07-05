@@ -22,6 +22,7 @@ class OrderItem(Base):
     )
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     unit_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    unit_cost: Mapped[Optional[float]] = mapped_column(Numeric(10, 2), nullable=True)
 
     # Relationships
     order: Mapped["Order"] = relationship("Order", back_populates="order_items")

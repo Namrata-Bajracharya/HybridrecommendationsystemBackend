@@ -24,6 +24,8 @@ class Product(Base):
     slug: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
     price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    buying_price: Mapped[Optional[float]] = mapped_column(Numeric(10, 2), nullable=True)
+    selling_price: Mapped[Optional[float]] = mapped_column(Numeric(10, 2), nullable=True)
     stock_quantity: Mapped[int] = mapped_column(default=0)
     sku: Mapped[Optional[str]] = mapped_column(String(100), unique=True)
     brand_id: Mapped[Optional[int]] = mapped_column(ForeignKey("brands.id"), nullable=True)

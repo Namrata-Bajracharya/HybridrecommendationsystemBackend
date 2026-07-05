@@ -13,11 +13,15 @@ class NotificationService:
         title: str,
         message: str,
         user_id: Optional[int] = None,
+        type: Optional[str] = None,
+        order_id: Optional[int] = None,
     ) -> NotificationResponse:
         notif = Notification(
             user_id=user_id,
             title=title,
             message=message,
+            type=type,
+            order_id=order_id,
             read=False,
         )
         self.db.add(notif)

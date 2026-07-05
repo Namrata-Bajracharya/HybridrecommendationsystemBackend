@@ -44,8 +44,11 @@ class OrderCrud:
     def _resolve_cart_item_price(self, item: CartItem) -> float:
         if item.variant_id:
             variant = self.db.get(ProductVariant, item.variant_id)
-            if variant and variant.price is not None:
-                return variant.price
+            if variant:
+                if variant.selling_price is not None:
+                    return variant.selling_price
+                if variant.price is not None:
+                    return variant.price
         return float(item.product.price)
 
     def _resolve_cart_item_stock(self, item: CartItem) -> int:
@@ -88,7 +91,7 @@ class OrderCrud:
         self.db.add(order)
         self.db.flush()  # Get order.id
 
-        # Create order items + reduce stock
+        # Create order items (stock deducted + FIFO cost allocated when order goes to on_delivery)
         for item in items:
             unit_price = self._resolve_cart_item_price(item)
             order_item = OrderItem(
@@ -96,17 +99,10 @@ class OrderCrud:
                 product_id=item.product_id,
                 variant_id=item.variant_id,
                 unit_price=unit_price,
+                unit_cost=None,
                 quantity=item.quantity,
             )
             self.db.add(order_item)
-
-            # Reduce stock
-            if item.variant_id:
-                variant = self.db.get(ProductVariant, item.variant_id)
-                if variant:
-                    variant.stock_quantity -= item.quantity
-            else:
-                item.product.stock_quantity -= item.quantity
 
         # Clear cart
         for item in items:
