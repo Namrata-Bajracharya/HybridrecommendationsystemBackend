@@ -24,3 +24,4 @@ from .stock_batch import StockBatch
 from .shipping import ShippingZone, Courier
 from .supplier import Supplier
 from .rejection_reason import RejectionReason
+from .test_session import TestSession

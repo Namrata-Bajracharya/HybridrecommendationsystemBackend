@@ -468,7 +468,8 @@ class AdminService:
         for w in items:
             img = (
                 self.db.query(ProductImage)
-                .filter(ProductImage.product_id == w.product_id, ProductImage.is_primary == True)
+                .filter(ProductImage.product_id == w.product_id)
+                .order_by(ProductImage.sort_order)
                 .first()
             )
             result.append(
@@ -480,7 +481,7 @@ class AdminService:
                     product_id=w.product_id,
                     product_name=w.product.name,
                     product_price=float(w.product.selling_price or 0),
-                    product_image=img.image_url if img else None,
+                    product_image=img.document.relative_path if img and img.document else None,
                     created_at=w.created_at,
                 )
             )

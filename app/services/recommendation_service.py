@@ -6,6 +6,7 @@ from typing import List, Dict, Optional, Set, Tuple
 from pathlib import Path
 import numpy as np
 import pandas as pd
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.core.logger import logger
 
@@ -16,6 +17,11 @@ try:
 except ImportError:
     JOBLIB_AVAILABLE = False
     logger.warning("joblib not installed - recommendation model serialization disabled")
+
+# Module-level storage shared across all RecommendationService instances
+# (FastAPI creates a new service per request, so instance attrs don't persist)
+_user_actions: Dict[str, Dict[str, str]] = {}
+_global_action_scores: Dict[str, float] = {}
 
 
 class RecommendationService:
@@ -32,6 +38,7 @@ class RecommendationService:
         self.model = None
         self.recommendation_cache = {}
         self.user_similarity_cache = {}
+        # user_actions and global_action_scores are module-level shared dicts
 
         self._load_ml_data()
         self._load_paraquest_scores()
@@ -641,6 +648,312 @@ class RecommendationService:
         except Exception as e:
             logger.error(f"Error finding similar users: {e}")
             return []
+
+    # ── Test Recommendation helpers (in-memory user actions) ──
+
+    ACTION_WEIGHTS = {
+        "buy": 1.0,
+        "return": -1.0,
+        "positive_review": 0.8,
+        "negative_review": -0.8,
+        "high_rating": 0.6,
+        "low_rating": -0.6,
+        "cancel": 0.0,
+        "normal": 0.0,
+    }
+
+    def record_action(self, user_id: str, product_id: str, action: str):
+        """Record a buy/cancel/return/review/rating action for a user (for test recommendation).
+        Also updates global_action_scores so auth user actions affect ALL users' recommendations."""
+        if user_id not in _user_actions:
+            _user_actions[user_id] = {}
+
+        # Undo previous action's global score if user had one
+        prev_action = _user_actions[user_id].get(product_id)
+        if prev_action and prev_action != action:
+            prev_weight = self.ACTION_WEIGHTS.get(prev_action, 0)
+            _global_action_scores[product_id] = _global_action_scores.get(product_id, 0) - prev_weight
+
+        if action == "normal":
+            _user_actions[user_id].pop(product_id, None)
+        else:
+            _user_actions[user_id][product_id] = action
+            new_weight = self.ACTION_WEIGHTS.get(action, 0)
+            _global_action_scores[product_id] = _global_action_scores.get(product_id, 0) + new_weight
+
+        # Cleanup zero entries
+        if _global_action_scores.get(product_id) == 0:
+            _global_action_scores.pop(product_id, None)
+
+        logger.info(f"User {user_id} action {action} on product {product_id}")
+
+    def get_user_actions(self, user_id: str) -> Dict[str, str]:
+        """Get all actions for a user"""
+        return _user_actions.get(user_id, {})
+
+    def get_test_recommendations(
+        self,
+        user_id: str,
+        top_k: int = 10,
+        cart_item_ids: Optional[List[str]] = None,
+        viewed_product_ids: Optional[List[str]] = None,
+        wishlist_item_ids: Optional[List[str]] = None,
+    ) -> List[Dict]:
+        """
+        Hybrid recommendation combining multiple factors:
+
+        A. User reviews — products similar to highly-rated items (auth only)
+        B. Product popularity — most-interacted items across all users
+        C. Wishlist — products similar to wishlist items (from DB for auth, from params for guests)
+        D. Similar-user purchases — users with matching buying patterns (auth only)
+        E. Real-time user actions — buy/return/review/rating signals (auth only)
+        F. Cart-based — recommendations from items in user's cart
+        G. Viewed-products — recommendations based on recently viewed items + category affinity
+        H. Category-based — from frequently viewed categories
+        I. Guest wishlist — wishlist items sent from browser storage
+        """
+        from app.models.review import Review
+        from app.models.wishlist import Wishlist
+        from app.models.order_item import OrderItem
+        from app.models.product import Product
+
+        if cart_item_ids is None:
+            cart_item_ids = []
+        if viewed_product_ids is None:
+            viewed_product_ids = []
+        if wishlist_item_ids is None:
+            wishlist_item_ids = []
+
+        scores: Dict[str, float] = {}
+        reasons: Dict[str, List[str]] = {}
+
+        def _add_score(pid: str, weight: float, reason: str):
+            scores[pid] = scores.get(pid, 0.0) + weight
+            if pid not in reasons:
+                reasons[pid] = []
+            reasons[pid].append(reason)
+
+        try:
+            uid = int(user_id) if user_id != "anon" else None
+        except ValueError:
+            uid = None
+
+        is_auth = uid is not None
+
+        # ── A. Review-based (auth only) ──
+        if is_auth:
+            high_rated = (
+                self.db.query(Review.product_id)
+                .filter(Review.user_id == uid, Review.rating >= 4)
+                .all()
+            )
+            for (pid,) in high_rated:
+                similar = self.get_similar_products(str(pid), top_k=3)
+                for rec in similar:
+                    _add_score(rec["item_id"], 0.25, "Based on your high-rated items")
+
+        # ── B. Popularity ──
+        if not self.interactions_df.empty:
+            pop = self.interactions_df["item_id"].value_counts().head(20)
+            for item_id, count in pop.items():
+                norm = min(count / 1000, 1.0)
+                _add_score(str(item_id), norm * 0.2, "Popular product")
+        else:
+            try:
+                pop_items = (
+                    self.db.query(OrderItem.product_id)
+                    .group_by(OrderItem.product_id)
+                    .order_by(func.count(OrderItem.product_id).desc())
+                    .limit(20)
+                    .all()
+                )
+                for i, (pid,) in enumerate(pop_items):
+                    norm = max(0, 1 - i / 20)
+                    _add_score(str(pid), norm * 0.2, "Popular product")
+            except Exception:
+                pass
+
+        def _db_similar_products(pid: str, top_k: int = 3) -> List[Dict]:
+            """Fallback: find products in the same category via DB (works without ML data)"""
+            try:
+                product = self.db.query(Product.category_id).filter(Product.id == int(pid)).first()
+                if not product:
+                    return []
+                similar = (
+                    self.db.query(Product.id)
+                    .filter(
+                        Product.category_id == product.category_id,
+                        Product.id != int(pid),
+                        Product.is_active == True,
+                    )
+                    .limit(top_k)
+                    .all()
+                )
+                return [{"item_id": str(sid)} for (sid,) in similar]
+            except Exception:
+                return []
+
+        # ── C. Wishlist-based (auth: from DB, guest: from params) ──
+        wish_ids = []
+        if is_auth:
+            db_wishlist = (
+                self.db.query(Wishlist.product_id)
+                .filter(Wishlist.user_id == uid)
+                .all()
+            )
+            wish_ids = [str(pid) for (pid,) in db_wishlist]
+        wish_ids = list(set(wish_ids + wishlist_item_ids))
+        for wid in wish_ids:
+            similar = self.get_similar_products(wid, top_k=3)
+            if not similar:
+                similar = _db_similar_products(wid, top_k=3)
+            for rec in similar:
+                _add_score(rec["item_id"], 0.25, "Similar to your wishlist items")
+
+        # ── D. Similar-user purchases (auth only) ──
+        if is_auth:
+            sim_user_recs = self.get_similar_user_recommendations(user_id=user_id, top_k=top_k)
+            for rec in sim_user_recs:
+                _add_score(rec["item_id"], 0.3, rec.get("reason", "Users with similar taste bought this"))
+
+        # ── E. Real-time user actions (auth only) ──
+        actions = _user_actions.get(user_id, {})
+
+        # Buy: similar products get a strong positive boost
+        bought_ids = [pid for pid, act in actions.items() if act == "buy"]
+        for pid in bought_ids:
+            similar = self.get_similar_products(pid, top_k=3)
+            if not similar:
+                similar = _db_similar_products(pid, top_k=3)
+            for rec in similar:
+                _add_score(rec["item_id"], 0.4, "Based on your current purchases")
+
+        # Return: similar products get a negative signal
+        return_ids = [pid for pid, act in actions.items() if act == "return"]
+        for pid in return_ids:
+            similar = self.get_similar_products(pid, top_k=3)
+            if not similar:
+                similar = _db_similar_products(pid, top_k=3)
+            for rec in similar:
+                _add_score(rec["item_id"], -0.3, "You returned similar items")
+
+        # Positive review: similar products get a boost
+        pos_review_ids = [pid for pid, act in actions.items() if act == "positive_review"]
+        for pid in pos_review_ids:
+            similar = self.get_similar_products(pid, top_k=3)
+            if not similar:
+                similar = _db_similar_products(pid, top_k=3)
+            for rec in similar:
+                _add_score(rec["item_id"], 0.3, "Based on your positive reviews")
+
+        # Negative review: similar products get penalized
+        neg_review_ids = [pid for pid, act in actions.items() if act == "negative_review"]
+        for pid in neg_review_ids:
+            similar = self.get_similar_products(pid, top_k=3)
+            if not similar:
+                similar = _db_similar_products(pid, top_k=3)
+            for rec in similar:
+                _add_score(rec["item_id"], -0.3, "Based on your negative reviews")
+
+        # High rating: similar products get a moderate boost
+        high_rating_ids = [pid for pid, act in actions.items() if act == "high_rating"]
+        for pid in high_rating_ids:
+            similar = self.get_similar_products(pid, top_k=3)
+            if not similar:
+                similar = _db_similar_products(pid, top_k=3)
+            for rec in similar:
+                _add_score(rec["item_id"], 0.25, "Based on your high ratings")
+
+        # Low rating: similar products get a moderate penalty
+        low_rating_ids = [pid for pid, act in actions.items() if act == "low_rating"]
+        for pid in low_rating_ids:
+            similar = self.get_similar_products(pid, top_k=3)
+            if not similar:
+                similar = _db_similar_products(pid, top_k=3)
+            for rec in similar:
+                _add_score(rec["item_id"], -0.25, "Based on your low ratings")
+
+        # ── J. Global test actions from all auth users (applies to ALL users) ──
+        for pid, global_score in _global_action_scores.items():
+            if global_score > 0:
+                similar = self.get_similar_products(pid, top_k=2)
+                if not similar:
+                    similar = _db_similar_products(pid, top_k=2)
+                for rec in similar:
+                    _add_score(rec["item_id"], min(global_score * 0.05, 0.2), "Popular with other testers")
+            elif global_score < 0:
+                similar = self.get_similar_products(pid, top_k=2)
+                if not similar:
+                    similar = _db_similar_products(pid, top_k=2)
+                for rec in similar:
+                    _add_score(rec["item_id"], max(global_score * 0.05, -0.2), "Less popular with other testers")
+
+        # ── F. Cart-based ──
+        for cid in cart_item_ids:
+            similar = self.get_similar_products(cid, top_k=3)
+            if not similar:
+                similar = _db_similar_products(cid, top_k=3)
+            for rec in similar:
+                _add_score(rec["item_id"], 0.3, "Based on items in your cart")
+
+        # ── G. Viewed-products-based (recently viewed) ──
+        for vid in viewed_product_ids:
+            similar = self.get_similar_products(vid, top_k=2)
+            if not similar:
+                similar = _db_similar_products(vid, top_k=2)
+            for rec in similar:
+                _add_score(rec["item_id"], 0.2, "Similar to products you viewed")
+
+        # ── H. Category-based from viewed products (DB fallback) ──
+        if viewed_product_ids:
+            try:
+                viewed_cats = set()
+                for vid in viewed_product_ids:
+                    product = self.db.query(Product.category_id).filter(Product.id == int(vid)).first()
+                    if product:
+                        viewed_cats.add(product.category_id)
+
+                if viewed_cats:
+                    same_cat = (
+                        self.db.query(Product.id)
+                        .filter(
+                            Product.category_id.in_(list(viewed_cats)),
+                            ~Product.id.in_([int(v) for v in viewed_product_ids if v.isdigit()]),
+                            Product.is_active == True,
+                        )
+                        .limit(15)
+                        .all()
+                    )
+                    for (sid,) in same_cat:
+                        _add_score(str(sid), 0.15, "From categories you browse")
+            except Exception:
+                pass
+
+        # Exclude products the user has cancelled, bought, or returned
+        exclude = set()
+        for pid, act in actions.items():
+            if act in ("cancel", "buy", "return"):
+                exclude.add(pid)
+
+        # Sort and return top K
+        ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        results = []
+        seen = set()
+        for pid, score in ranked:
+            if pid in exclude or pid in seen:
+                continue
+            seen.add(pid)
+            results.append({
+                "item_id": pid,
+                "rank": len(results) + 1,
+                "score": min(score, 1.0),
+                "reasons": reasons.get(pid, []),
+                "reason": reasons.get(pid, ["Personalized for you"])[0],
+            })
+            if len(results) >= top_k:
+                break
+
+        return results
 
     def clear_cache(self):
         """Clear recommendation caches"""

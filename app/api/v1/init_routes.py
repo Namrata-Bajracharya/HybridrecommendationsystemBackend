@@ -18,6 +18,7 @@ from app.api.v1.routes import (
     variant,
     wishlist,
     test,
+    test_recommendation,
 )
 
 
@@ -39,3 +40,4 @@ def init_routes(app: FastAPI):
     app.include_router(router=collection.router, prefix="/collections")
     app.include_router(router=variant.router)          # root_path supplies /api/v1
     app.include_router(router=test.router, prefix="/test")
+    app.include_router(router=test_recommendation.router)

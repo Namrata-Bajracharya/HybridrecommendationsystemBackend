@@ -59,3 +59,12 @@ async def disconnect(sid):
 @sio.event
 async def ping(sid, data=None):
     await sio.emit("pong", room=sid)
+
+
+@sio.event
+async def join_testrec(sid, data):
+    """Join test recommendation rooms: global + session-specific."""
+    await sio.enter_room(sid, "testrec_all")
+    session_id = data.get("session_id") if isinstance(data, dict) else None
+    if session_id:
+        await sio.enter_room(sid, f"testrec:{session_id}")
