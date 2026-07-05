@@ -55,6 +55,7 @@ def add_missing_columns(db):
         ("reviews", "replied_at", "DATETIME"),
         ("products", "buying_price", "NUMERIC(10,2)"),
         ("products", "selling_price", "NUMERIC(10,2)"),
+        ("products", "brand_id", "INTEGER"),
         ("product_variants", "buying_price", "FLOAT"),
         ("product_variants", "selling_price", "FLOAT"),
         ("orderitems", "unit_cost", "NUMERIC(10,2)"),
