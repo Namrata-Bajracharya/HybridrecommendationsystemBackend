@@ -47,6 +47,8 @@ def place_direct_order(
         contact_phone=payload.contact_phone,
         contact_email=payload.contact_email,
         payment_mode=payload.payment_mode,
+        shipping_district=payload.shipping_district,
+        shipping_zone=payload.shipping_zone,
     )
 
 

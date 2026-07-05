@@ -67,7 +67,7 @@ class OrderCrud:
                     f"Available: {stock}"
                 )
 
-    def create_order(self, user_id: int, shipping_id: int, billing_id: int):
+    def create_order(self, user_id: int, shipping_id: int, billing_id: int, shipping_cost: float = 0):
         # Validate addresses
         self.validate_address(user_id, shipping_id)
         self.validate_address(user_id, billing_id)
@@ -77,7 +77,8 @@ class OrderCrud:
         self.validate_stock(items)
 
         # Compute total
-        total_amount = sum(self._resolve_cart_item_price(i) * i.quantity for i in items)
+        subtotal = sum(self._resolve_cart_item_price(i) * i.quantity for i in items)
+        total_amount = subtotal + shipping_cost
 
         order = Order(
             user_id=user_id,
@@ -85,6 +86,7 @@ class OrderCrud:
             billing_address_id=billing_id,
             order_number=generate_order_number(),
             total_amount=total_amount,
+            shipping_cost=shipping_cost,
             status="pending",
             tx_ref=generate_trx_ref(),
         )

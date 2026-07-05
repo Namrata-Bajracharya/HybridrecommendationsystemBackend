@@ -2,6 +2,7 @@ from app.crud.order import OrderCrud
 from app.models.order import Order
 from app.models.order_item import OrderItem
 from app.models.user import User
+from app.models.address import Address
 from app.utils.order_utils import generate_order_number, generate_trx_ref
 from app.schema.order_schema import OrderListResponse, OrderItemResponse
 from typing import Optional
@@ -14,6 +15,7 @@ from app.websocket_manager import manager
 from app.socketio_server import sio
 from app.services.notification_service import NotificationService
 from app.services import email_service
+from app.services.shipping_service import calculate_shipping
 import json
 import asyncio
 import threading
@@ -84,8 +86,31 @@ class OrderService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
         return order
 
+    FREE_SHIPPING_MIN = 2000.0
+
     def place_order(self, user_id: int, shipping_id: int, billing_id: int):
-        return self.crud.create_order(user_id, shipping_id, billing_id)
+        address = self.db.get(Address, shipping_id)
+
+        shipping_cost = 0.0
+        if address and address.district:
+            result = calculate_shipping(
+                self.db,
+                customer_lat=address.latitude or 0,
+                customer_lng=address.longitude or 0,
+                customer_district=address.district,
+                customer_zone=address.zone,
+            )
+            shipping_cost = result["cost"]
+
+        subtotal = sum(
+            self.crud._resolve_cart_item_price(i) * i.quantity
+            for i in self.crud.get_cart_items(user_id)
+        )
+
+        if subtotal >= self.FREE_SHIPPING_MIN:
+            shipping_cost = 0.0
+
+        return self.crud.create_order(user_id, shipping_id, billing_id, shipping_cost)
 
     def place_direct_order(
         self,
@@ -99,7 +124,25 @@ class OrderService:
         contact_phone: str = "",
         contact_email: str = "",
         payment_mode: str = "cod",
+        shipping_district: str | None = None,
+        shipping_zone: str | None = None,
     ):
+        # Server-calculated shipping overrides client-provided value
+        if shipping_district:
+            calc = calculate_shipping(
+                self.db,
+                customer_lat=0,
+                customer_lng=0,
+                customer_district=shipping_district,
+                customer_zone=shipping_zone,
+            )
+            calculated = calc["cost"]
+            subtotal = total_amount - shipping_cost
+            if subtotal >= self.FREE_SHIPPING_MIN:
+                calculated = 0
+            shipping_cost = calculated
+            total_amount = subtotal + shipping_cost + tax - discount
+
         order = Order(
             user_id=user_id,
             shipping_address_id=None,

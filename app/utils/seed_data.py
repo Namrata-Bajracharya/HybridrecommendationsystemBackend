@@ -45,36 +45,47 @@ LAST_NAMES = [
     "Sinha", "Bose", "Ghosh", "Desai", "Bhatt",
 ]
 
-CITIES = [
-    ("Mumbai", "Mumbai City", "Maharashtra"),
-    ("Delhi", "Central Delhi", "Delhi"),
-    ("Bangalore", "Bangalore Urban", "Karnataka"),
-    ("Hyderabad", "Hyderabad", "Telangana"),
-    ("Ahmedabad", "Ahmedabad", "Gujarat"),
-    ("Chennai", "Chennai", "Tamil Nadu"),
-    ("Kolkata", "Kolkata", "West Bengal"),
-    ("Pune", "Pune", "Maharashtra"),
-    ("Jaipur", "Jaipur", "Rajasthan"),
-    ("Lucknow", "Lucknow", "Uttar Pradesh"),
-    ("Surat", "Surat", "Gujarat"),
-    ("Indore", "Indore", "Madhya Pradesh"),
-    ("Bhopal", "Bhopal", "Madhya Pradesh"),
-    ("Chandigarh", "Chandigarh", "Chandigarh"),
-    ("Nagpur", "Nagpur", "Maharashtra"),
-    ("Patna", "Patna", "Bihar"),
-    ("Thiruvananthapuram", "Thiruvananthapuram", "Kerala"),
-    ("Coimbatore", "Coimbatore", "Tamil Nadu"),
-    ("Guwahati", "Kamrup", "Assam"),
-    ("Bhubaneswar", "Khordha", "Odisha"),
+# (city, district, province) — all Nepali locations; admin shop is in Kathmandu, Bagmati
+NEPAL_CITIES = [
+    ("Kathmandu", "Kathmandu", "Bagmati"),
+    ("Lalitpur", "Lalitpur", "Bagmati"),
+    ("Bhaktapur", "Bhaktapur", "Bagmati"),
+    ("Kirtipur", "Kathmandu", "Bagmati"),
+    ("Madhyapur Thimi", "Bhaktapur", "Bagmati"),
+    ("Pokhara", "Kaski", "Gandaki"),
+    ("Bharatpur", "Chitwan", "Bagmati"),
+    ("Biratnagar", "Morang", "Koshi"),
+    ("Birgunj", "Parsa", "Madhesh"),
+    ("Butwal", "Rupandehi", "Lumbini"),
+    ("Nepalgunj", "Banke", "Lumbini"),
+    ("Dhangadhi", "Kailali", "Sudurpashchim"),
+    ("Janakpur", "Dhanusha", "Madhesh"),
+    ("Hetauda", "Makwanpur", "Bagmati"),
+    ("Damak", "Jhapa", "Koshi"),
+    ("Tansen", "Palpa", "Lumbini"),
+    ("Jaleshwar", "Mahottari", "Madhesh"),
+    ("Ghorahi", "Dang", "Lumbini"),
+    ("Itahari", "Sunsari", "Koshi"),
+    ("Bhadrapur", "Jhapa", "Koshi"),
+    ("Rajbiraj", "Saptari", "Madhesh"),
+    ("Gorkha", "Gorkha", "Gandaki"),
+    ("Baglung", "Baglung", "Gandaki"),
+    ("Tulsipur", "Dang", "Lumbini"),
+    ("Kalaiya", "Bara", "Madhesh"),
+    ("Kamalamai", "Sindhuli", "Bagmati"),
+    ("Gularia", "Bardiya", "Lumbini"),
+    ("Birendranagar", "Surkhet", "Karnali"),
+    ("Jumla", "Jumla", "Karnali"),
+    ("Dipayal", "Doti", "Sudurpashchim"),
 ]
 
 STREETS = [
-    "MG Road", "Park Street", "Lake View Road", "Main Street", "Church Street",
-    "Commercial Street", "Banjara Hills Road", "Koregaon Park Road",
-    "Marine Drive", "Bandra West", "Connaught Place", "Janpath",
-    "Sector 18", "Gandhi Nagar", "Civil Lines", "VIP Road",
-    "Salt Lake Sector V", "HBR Layout", "Jayanagar", "Indiranagar",
-    "Whitefield Main Road", "Sarjapur Road", "Electronic City Phase 1",
+    "New Road", "Durbar Marg", "Thamel", "Basantapur", "Putalisadak",
+    "Lainchaur", "Baluwatar", "Naxal", "Kamaladi", "Tripureshwor",
+    "Maitighar", "Ratna Park", "Baneshwor", "Koteshwor", "Boudha",
+    "Chabahil", "Bhatbhateni", "Kupondole", "Jawalakhel", "Patan Durbar Square",
+    "Bhaktapur Durbar Square", "Suryabinayak", "Bharatpur Chowk", "Pokhara Lakeside",
+    "Prithvi Highway", "Mahendra Highway", "Siddhartha Highway", "Tribhuvan Highway",
 ]
 
 REVIEW_COMMENTS = {
@@ -210,7 +221,7 @@ def seed():
     print("Creating addresses...")
     all_addresses = []
     for user in users:
-        city, district, state = random.choice(CITIES)
+        city, district, province = random.choice(NEPAL_CITIES)
         street = random.choice(STREETS)
         house = f"{random.randint(1, 999)}/{random.randint(1, 50)}"
 
@@ -222,10 +233,10 @@ def seed():
             street=f"{house}, {street}",
             city=city,
             district=district,
-            zone=f"Zone {random.randint(1, 10)}",
-            state=state,
-            postal_code=str(random.randint(100000, 999999)),
-            country="India",
+            zone=province,
+            state=province,
+            postal_code=str(random.randint(10000, 99999)),
+            country="Nepal",
             is_default=True,
         )
         db.add(shipping)
@@ -233,7 +244,7 @@ def seed():
         all_addresses.append(shipping)
 
         if random.random() < 0.3:
-            city2, district2, state2 = random.choice(CITIES)
+            city2, district2, province2 = random.choice(NEPAL_CITIES)
             street2 = random.choice(STREETS)
             billing = Address(
                 user_id=user.id,
@@ -243,10 +254,10 @@ def seed():
                 street=f"{random.randint(1, 999)}, {street2}",
                 city=city2,
                 district=district2,
-                zone=f"Zone {random.randint(1, 10)}",
-                state=state2,
-                postal_code=str(random.randint(100000, 999999)),
-                country="India",
+                zone=province2,
+                state=province2,
+                postal_code=str(random.randint(10000, 99999)),
+                country="Nepal",
                 is_default=False,
             )
         else:
@@ -258,10 +269,10 @@ def seed():
                 street=f"{random.randint(1, 999)}, {street}",
                 city=city,
                 district=district,
-                zone=f"Zone {random.randint(1, 10)}",
-                state=state,
-                postal_code=str(random.randint(100000, 999999)),
-                country="India",
+                zone=province,
+                state=province,
+                postal_code=str(random.randint(10000, 99999)),
+                country="Nepal",
                 is_default=False,
             )
         db.add(billing)
@@ -319,7 +330,21 @@ def seed():
                     "unit_cost": round(unit_cost, 2),
                 })
 
-            shipping_cost = random.choice([0, 0, 40, 49, 79])
+            subtotal = total
+            cust_province = (shipping_addr.zone or "").lower()
+            cust_district = (shipping_addr.district or "").lower()
+            shop_province = "bagmati"
+            shop_district = "kathmandu"
+
+            if subtotal >= 2000:
+                shipping_cost = 0
+            elif cust_province == shop_province and cust_district == shop_district:
+                shipping_cost = random.choice([40, 50, 60, 80])
+            elif cust_province == shop_province:
+                shipping_cost = random.choice([80, 120, 150, 200])
+            else:
+                shipping_cost = random.choice([300, 500, 600, 800, 1000])
+
             total += shipping_cost
             tax = round(total * 0.05, 2) if random.random() < 0.5 else 0
             discount = round(total * random.uniform(0, 0.15), 2) if random.random() < 0.3 else 0
