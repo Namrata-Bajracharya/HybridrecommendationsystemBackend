@@ -159,6 +159,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 logger.info("Seeded %d rejection reasons", len(reasons))
         except Exception as e:
             logger.exception("Failed to seed rejection reasons: %s", e)
+
+        # Seed transactional test data (users, orders, reviews) if orders table is empty
+        try:
+            from app.models.order import Order
+            if db.query(Order).count() == 0:
+                from app.utils.seed_data import seed as seed_data
+                seed_data()
+                logger.info("Seeded transactional test data (users, orders, reviews)")
+        except Exception as e:
+            logger.exception("Failed to seed transactional test data: %s", e)
     finally:
         db.close()
 
